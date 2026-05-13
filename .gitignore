@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Secrets — NEVER commit API keys
+.arch-viewer.keys.json
+.env
+.env.local
+
+# Build artifacts
+*.tgz
+*.tar.gz
+htmlcov/
+coverage/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Lock files (keep package-lock.json for reproducible Node installs)
+# package-lock.json

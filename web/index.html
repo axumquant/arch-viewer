@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arch Viewer — DevKit</title>
+<style>
+  :root {
+    --bg: #0d1117; --bg2: #161b22; --bg3: #21262d; --bg4: #30363d;
+    --fg: #c9d1d9; --fg2: #8b949e; --fg3: #484f58;
+    --accent: #58a6ff; --accent2: #388bfd; --green: #3fb950;
+    --yellow: #d29922; --red: #f85149; --purple: #bc8cff;
+    --orange: #d18616; --pink: #f778ba;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+    --radius: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body { font-family: var(--font); background: var(--bg); color: var(--fg); display: flex; flex-direction: column; }
+
+  /* Header */
+  .header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; background: var(--bg2); border-bottom: 1px solid var(--bg4); flex-shrink: 0; }
+  .header .logo { font-size: 18px; font-weight: 700; color: var(--accent); }
+  .header .project-name { font-size: 13px; color: var(--fg2); }
+  .header .stats { margin-left: auto; display: flex; gap: 16px; font-size: 12px; color: var(--fg2); }
+  .header .stat-val { color: var(--fg); font-weight: 600; }
+  .header .ai-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--purple); color: #fff; }
+  .header .ai-badge.off { background: var(--fg3); }
+  .header .refresh-btn { background: none; border: 1px solid var(--bg4); color: var(--fg2); padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+  .header .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); transition: 0.3s; }
+  .conn-dot.on { background: var(--green); }
+
+  /* Main layout */
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* Sidebar */
+  .sidebar { width: 260px; min-width: 180px; background: var(--bg2); border-right: 1px solid var(--bg4); display: flex; flex-direction: column; overflow: hidden; }
+  .sidebar-hdr { padding: 10px 12px; border-bottom: 1px solid var(--bg4); flex-shrink: 0; }
+  .sidebar-hdr input { width: 100%; background: var(--bg3); border: 1px solid var(--bg4); border-radius: 6px; padding: 6px 10px; color: var(--fg); font-size: 12px; outline: none; }
+  .sidebar-hdr input:focus { border-color: var(--accent); }
+  .file-tree { flex: 1; overflow-y: auto; padding: 6px 0; font-size: 12px; }
+  .ti { display: flex; align-items: center; gap: 5px; padding: 3px 12px; cursor: pointer; white-space: nowrap; user-select: none; }
+  .ti:hover { background: var(--bg3); }
+  .ti.active { background: var(--accent2); color: #fff; }
+  .ti.flash { animation: flash 1s ease-out; }
+  @keyframes flash { 0%{background:rgba(63,185,80,0.3)} 100%{background:transparent} }
+  .ti .ic { width: 14px; text-align: center; font-size: 11px; flex-shrink: 0; }
+  .ti .nm { overflow: hidden; text-overflow: ellipsis; }
+
+  /* Center */
+  .center { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .tabs { display: flex; gap: 0; background: var(--bg2); border-bottom: 1px solid var(--bg4); flex-shrink: 0; overflow-x: auto; }
+  .tab { padding: 7px 14px; font-size: 11px; cursor: pointer; border-bottom: 2px solid transparent; color: var(--fg2); display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .tab:hover { color: var(--fg); background: var(--bg3); }
+  .tab.active { color: var(--fg); border-bottom-color: var(--accent); background: var(--bg); }
+  .tab .x { width: 14px; height: 14px; display: flex; align-items: center; justify-content: center; border-radius: 3px; font-size: 13px; opacity: 0; }
+  .tab:hover .x { opacity: 0.7; }
+  .tab .x:hover { opacity: 1; background: var(--bg4); }
+  .tab .dot { color: var(--yellow); font-size: 8px; }
+
+  .view-bar { display: flex; gap: 0; padding: 4px 12px; background: var(--bg2); border-bottom: 1px solid var(--bg4); flex-shrink: 0; }
+  .vb { padding: 4px 12px; font-size: 11px; cursor: pointer; background: none; border: 1px solid var(--bg4); color: var(--fg2); }
+  .vb:first-child { border-radius: 4px 0 0 4px; }
+  .vb:last-child { border-radius: 0 4px 4px 0; }
+  .vb.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  .content { flex: 1; overflow: hidden; position: relative; }
+  .pane { width: 100%; height: 100%; overflow: auto; display: none; }
+  .pane.active { display: block; }
+
+  /* Architecture view */
+  #archView { padding: 24px; }
+  .section-title { font-size: 15px; font-weight: 600; color: var(--fg); margin: 24px 0 12px; }
+  .section-title:first-child { margin-top: 0; }
+
+  .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 20px; }
+  .stat-box { background: var(--bg2); border: 1px solid var(--bg4); border-radius: var(--radius); padding: 14px; }
+  .stat-box .sl { font-size: 10px; color: var(--fg2); text-transform: uppercase; letter-spacing: 1px; }
+  .stat-box .sv { font-size: 24px; font-weight: 700; color: var(--accent); }
+
+  .comp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .comp-card { background: var(--bg2); border: 1px solid var(--bg4); border-radius: var(--radius); padding: 14px; cursor: pointer; transition: 0.2s; }
+  .comp-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .cc-hdr { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .cc-icon { font-size: 20px; }
+  .cc-name { font-size: 14px; font-weight: 600; }
+  .cc-tech { font-size: 11px; color: var(--fg2); }
+  .cc-desc { font-size: 12px; color: var(--fg2); margin-top: 6px; line-height: 1.5; }
+  .cc-path { font-size: 10px; color: var(--fg3); font-family: var(--mono); margin-top: 4px; }
+
+  /* Data flow diagram */
+  .flow-diagram { background: var(--bg2); border: 1px solid var(--bg4); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; min-height: 200px; }
+  .flow-diagram svg { width: 100%; }
+  .flow-node { cursor: pointer; }
+  .flow-node rect { fill: var(--bg3); stroke: var(--bg4); stroke-width: 2; rx: 8; }
+  .flow-node:hover rect { stroke: var(--accent); }
+  .flow-node text { fill: var(--fg); font-size: 12px; font-family: var(--font); }
+  .flow-edge line { stroke: var(--fg3); stroke-width: 1.5; }
+  .flow-edge text { fill: var(--fg2); font-size: 10px; }
+  .flow-edge .arrow { fill: var(--fg3); }
+
+  /* AI Summary */
+  .ai-summary { background: var(--bg2); border: 1px solid var(--purple); border-radius: var(--radius); padding: 16px; margin-bottom: 20px; line-height: 1.7; font-size: 13px; }
+  .ai-summary .ai-label { font-size: 10px; color: var(--purple); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .ai-summary strong { color: var(--fg); }
+  .ai-summary ul { margin: 8px 0; padding-left: 20px; }
+  .ai-summary li { margin: 4px 0; color: var(--fg2); }
+
+  /* Category bar */
+  .cat-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin: 8px 0; }
+  .cat-seg { transition: width 0.3s; }
+  .cat-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+  .cl-item { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--fg2); }
+  .cl-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+  /* Editor */
+  #editorView { display: none; flex-direction: column; }
+  #editorView.active { display: flex; }
+  .ed-info { padding: 6px 14px; font-size: 11px; color: var(--fg2); background: var(--bg2); border-bottom: 1px solid var(--bg4); display: flex; gap: 14px; align-items: center; flex-shrink: 0; }
+  .ed-info .badge { background: var(--bg4); padding: 2px 8px; border-radius: 4px; font-size: 10px; text-transform: uppercase; }
+  .save-btn { margin-left: auto; padding: 4px 12px; background: var(--green); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; opacity: 0; transition: 0.2s; }
+  .save-btn.show { opacity: 1; }
+  .ed-wrap { flex: 1; display: flex; overflow: auto; }
+  .ed-nums { padding: 10px 0 10px 10px; font-family: var(--mono); font-size: 13px; line-height: 1.6; color: var(--fg3); text-align: right; user-select: none; border-right: 1px solid var(--bg4); min-width: 44px; }
+  .ed-area { flex: 1; background: var(--bg); color: var(--fg); border: none; outline: none; padding: 10px; font-family: var(--mono); font-size: 13px; line-height: 1.6; tab-size: 4; resize: none; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+
+  /* Activity */
+  #activityView { padding: 12px; }
+  .act-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--bg3); animation: slideIn 0.3s ease-out; }
+  @keyframes slideIn { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
+  .act-ic { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
+  .act-ic.add { background: rgba(63,185,80,0.15); color: var(--green); }
+  .act-ic.mod { background: rgba(88,166,255,0.15); color: var(--accent); }
+  .act-ic.del { background: rgba(248,81,73,0.15); color: var(--red); }
+  .act-file { font-family: var(--mono); font-size: 12px; cursor: pointer; }
+  .act-file:hover { color: var(--accent); text-decoration: underline; }
+  .act-time { margin-left: auto; font-size: 10px; color: var(--fg3); }
+  .act-empty { padding: 40px; text-align: center; color: var(--fg3); }
+
+  /* Right panel */
+  .right-panel { width: 280px; background: var(--bg2); border-left: 1px solid var(--bg4); display: flex; flex-direction: column; overflow: hidden; }
+  .rp-search { padding: 10px; border-bottom: 1px solid var(--bg4); flex-shrink: 0; }
+  .rp-search input { width: 100%; background: var(--bg3); border: 1px solid var(--bg4); border-radius: 6px; padding: 7px 10px; color: var(--fg); font-size: 12px; outline: none; }
+  .rp-search input:focus { border-color: var(--accent); }
+  .rp-results { flex: 1; overflow-y: auto; padding: 6px; }
+  .sr { padding: 6px 10px; border-radius: 6px; cursor: pointer; margin-bottom: 3px; }
+  .sr:hover { background: var(--bg3); }
+  .sr-f { font-size: 11px; color: var(--accent); font-family: var(--mono); }
+  .sr-l { font-size: 10px; color: var(--fg3); }
+  .sr-t { font-size: 11px; color: var(--fg2); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Settings modal */
+  .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 1000; display: none; align-items: center; justify-content: center; }
+  .modal-overlay.show { display: flex; }
+  .modal { background: var(--bg2); border: 1px solid var(--bg4); border-radius: 12px; padding: 24px; width: 480px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .modal h2 { font-size: 16px; margin-bottom: 4px; color: var(--fg); }
+  .modal .subtitle { font-size: 12px; color: var(--fg2); margin-bottom: 18px; }
+  .key-row { margin-bottom: 14px; }
+  .key-row label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg2); margin-bottom: 5px; }
+  .key-row .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+  .key-row .status-dot.ok { background: var(--green); }
+  .key-row input { width: 100%; background: var(--bg3); border: 1px solid var(--bg4); border-radius: 6px; padding: 8px 10px; color: var(--fg); font-size: 12px; font-family: var(--mono); outline: none; }
+  .key-row input:focus { border-color: var(--accent); }
+  .key-row input::placeholder { color: var(--fg3); }
+  .key-row .hint { font-size: 10px; color: var(--fg3); margin-top: 3px; }
+  .key-row select { width: 100%; background: var(--bg3); border: 1px solid var(--bg4); border-radius: 6px; padding: 7px 10px; color: var(--fg); font-size: 12px; outline: none; margin-top: 6px; appearance: auto; }
+  .key-row select:focus { border-color: var(--accent); }
+  .key-row select:disabled { opacity: 0.4; cursor: not-allowed; }
+  .key-row select option { background: var(--bg2); color: var(--fg); }
+  .model-label { font-size: 11px; color: var(--fg2); margin-top: 6px; display: flex; align-items: center; gap: 6px; }
+  .rec-badge { font-size: 9px; background: var(--green); color: #fff; padding: 1px 6px; border-radius: 3px; font-weight: 600; }
+  .modal-actions { display: flex; gap: 10px; margin-top: 18px; }
+  .modal-actions button { padding: 8px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; }
+  .btn-save { background: var(--green); color: #fff; }
+  .btn-save:hover { opacity: 0.9; }
+  .btn-cancel { background: var(--bg3); color: var(--fg2); border: 1px solid var(--bg4) !important; }
+  .btn-cancel:hover { color: var(--fg); }
+  .active-provider { display: inline-block; padding: 2px 8px; border-radius: 4px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 600; }
+
+  ::-webkit-scrollbar { width: 7px; height: 7px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 4px; }
+  @media (max-width: 900px) { .sidebar { width: 200px; } .right-panel { display: none; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="logo">⚡ Arch Viewer</div>
+  <div class="project-name" id="projName">Loading...</div>
+  <div class="stats">
+    <span><span class="stat-val" id="sFiles">—</span> files</span>
+    <span><span class="stat-val" id="sSize">—</span></span>
+    <span><span class="stat-val" id="sComps">—</span> components</span>
+  </div>
+  <span class="ai-badge" id="aiBadge">AI</span>
+  <button class="refresh-btn" id="refreshBtn" title="Re-analyze with AI">↻ Refresh</button>
+  <button class="refresh-btn" id="settingsBtn" title="API key settings">⚙ Keys</button>
+  <div class="conn-dot" id="wsDot" title="WebSocket"></div>
+</div>
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-hdr"><input id="treeFilter" placeholder="Filter files..."/></div>
+    <div class="file-tree" id="fileTree"></div>
+  </div>
+  <div class="center">
+    <div class="tabs" id="tabBar"></div>
+    <div class="view-bar">
+      <button class="vb active" data-v="arch">Architecture</button>
+      <button class="vb" data-v="editor">Editor</button>
+      <button class="vb" data-v="activity">Activity</button>
+    </div>
+    <div class="content">
+      <div class="pane active" id="archView"></div>
+      <div class="pane" id="editorView"></div>
+      <div class="pane" id="activityView"><div class="act-empty">Watching for file changes...</div></div>
+    </div>
+  </div>
+  <div class="right-panel">
+    <div class="rp-search"><input id="searchInput" placeholder="Search across files..."/></div>
+    <div class="rp-results" id="searchResults"></div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal">
+    <h2>⚙ Provider & Model Settings</h2>
+    <div class="subtitle">Enter your API key, then select a model. Keys are stored locally in <code>.arch-viewer.keys.json</code></div>
+    <div id="keyRows"></div>
+    <div style="font-size:11px;color:var(--fg2);margin-top:10px;">
+      Active: <span class="active-provider" id="activeProvider">—</span>
+      <span id="activeModel" style="margin-left:4px;font-size:10px;color:var(--fg3)"></span>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-save" id="saveKeysBtn">Save & Analyze</button>
+      <button class="btn-cancel" id="cancelKeysBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const S = {
+  arch: null, openTabs: [], activeTab: null, view: "arch",
+  activities: [], dirty: new Set(), ws: null,
+};
+
+const CCOLORS = {
+  backend:"#3fb950", frontend:"#58a6ff", config:"#d29922",
+  style:"#bc8cff", template:"#f0883e", data:"#a371f7",
+  docs:"#8b949e", docker:"#2ea9df", ci:"#d18616",
+  shell:"#79c0ff", extension:"#f778ba", other:"#484f58",
+};
+const COMP_ICONS = {
+  backend:"🐍", frontend:"⚛️", extension:"🧩", database:"🗄️",
+  docker:"🐳", ci_cd:"⚡", config:"🤖", cache:"📦",
+  auth:"🔐", worker:"⚙️", mcp_server:"🔌", other:"📁",
+};
+
+// ─── WebSocket ───
+function connectWS() {
+  const proto = location.protocol==="https:"?"wss:":"ws:";
+  const ws = new WebSocket(`${proto}//${location.host}/ws`);
+  S.ws = ws;
+  ws.onopen = () => { document.getElementById("wsDot").classList.add("on"); };
+  ws.onclose = () => { document.getElementById("wsDot").classList.remove("on"); setTimeout(connectWS, 2000); };
+  ws.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.type === "init" || m.components) { S.arch = m; renderAll(); }
+    if (m.type === "file_change") handleChange(m);
+    if (m.type === "file_content") handleContent(m);
+    if (m.type === "file_saved") { S.dirty.delete(m.path); renderTabs(); }
+  };
+}
+
+function handleChange(ev) {
+  S.activities.unshift(ev); if (S.activities.length > 200) S.activities.pop();
+  renderActivity();
+  const el = document.querySelector(`.ti[data-p="${CSS.escape(ev.path)}"]`);
+  if (el) { el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1500); }
+  const tab = S.openTabs.find(t => t.path === ev.path);
+  if (tab && !S.dirty.has(ev.path)) reqFile(ev.path);
+  if (["created","deleted","moved"].includes(ev.event)) S.ws?.send(JSON.stringify({type:"rescan"}));
+}
+
+function handleContent(m) {
+  let tab = S.openTabs.find(t => t.path === m.path);
+  if (!tab) { tab = {path:m.path, content:m.content, lang:guessLang(m.path)}; S.openTabs.push(tab); }
+  else tab.content = m.content;
+  S.activeTab = m.path; S.view = "editor"; renderTabs(); renderEditor(); renderVB();
+}
+
+function reqFile(p) { S.ws?.readyState===1 && S.ws.send(JSON.stringify({type:"read_file",path:p})); }
+function saveFile(p,c) { S.ws?.readyState===1 && S.ws.send(JSON.stringify({type:"save_file",path:p,content:c})); }
+
+// ─── Render ───
+function renderAll() {
+  if (!S.arch) return;
+  document.getElementById("projName").textContent = S.arch.project_name || "Project";
+  const st = S.arch.stats||{};
+  document.getElementById("sFiles").textContent = st.total_files||0;
+  document.getElementById("sSize").textContent = fmtB(st.total_size||0);
+  document.getElementById("sComps").textContent = (S.arch.components||[]).length;
+  const badge = document.getElementById("aiBadge");
+  badge.textContent = S.arch.ai_summary ? "AI ✓" : "AI";
+  badge.className = "ai-badge" + (S.arch.ai_summary ? "" : " off");
+  renderTree(); renderArch(); renderTabs(); renderActivity();
+}
+
+function renderTree() {
+  const c = document.getElementById("fileTree");
+  const f = document.getElementById("treeFilter").value.toLowerCase();
+  c.innerHTML = "";
+  if (!S.arch?.file_tree) return;
+  walkTree(c, S.arch.file_tree, 0, f, "");
+}
+
+function walkTree(container, node, depth, filter, prefix) {
+  const entries = Object.entries(node).filter(([k]) => k !== "_file").sort(([a,av],[b,bv]) => {
+    const aDir = !av._file, bDir = !bv._file;
+    if (aDir && !bDir) return -1; if (!aDir && bDir) return 1; return a.localeCompare(b);
+  });
+  for (const [name, val] of entries) {
+    const path = prefix ? prefix+"/"+name : name;
+    const isFile = !!val._file;
+    if (filter && isFile && !name.toLowerCase().includes(filter) && !path.toLowerCase().includes(filter)) continue;
+    const d = document.createElement("div");
+    d.className = "ti" + (S.activeTab===path?" active":"");
+    d.style.paddingLeft = (12+depth*14)+"px";
+    d.dataset.p = path;
+    d.innerHTML = `<span class="ic">${isFile ? fileIcon(val._file.category) : "📁"}</span><span class="nm">${name}</span>`;
+    if (isFile) d.onclick = () => openFile(path);
+    container.appendChild(d);
+    if (!isFile) walkTree(container, val, depth+1, filter, path);
+  }
+}
+
+function renderArch() {
+  const c = document.getElementById("archView");
+  if (!S.arch) { c.innerHTML = '<div style="padding:40px;text-align:center;color:var(--fg3)">Scanning...</div>'; return; }
+  const a = S.arch, st = a.stats||{}, comps = a.components||[], flows = a.data_flows||[];
+  const cats = Object.entries(st.by_category||{}).sort((a,b)=>b[1]-a[1]);
+  const totalF = st.total_files||1;
+
+  let h = "";
+
+  // AI Summary
+  if (a.ai_summary) {
+    h += `<div class="ai-summary"><div class="ai-label">🤖 AI Architecture Analysis</div>${mdToHtml(a.ai_summary)}</div>`;
+  }
+
+  // Stats
+  h += `<div class="section-title">Overview</div><div class="stats-row">
+    <div class="stat-box"><div class="sl">Files</div><div class="sv">${st.total_files||0}</div></div>
+    <div class="stat-box"><div class="sl">Size</div><div class="sv">${fmtB(st.total_size||0)}</div></div>
+    <div class="stat-box"><div class="sl">Languages</div><div class="sv">${Object.keys(st.by_language||{}).length}</div></div>
+    <div class="stat-box"><div class="sl">Components</div><div class="sv">${comps.length}</div></div>
+    <div class="stat-box"><div class="sl">Data Flows</div><div class="sv">${flows.length}</div></div>
+    <div class="stat-box"><div class="sl">Dependencies</div><div class="sv">${(a.dependencies||[]).length}</div></div>
+  </div>`;
+
+  // Data Flow Diagram
+  if (flows.length > 0 && comps.length > 1) {
+    h += `<div class="section-title">Data Flow</div><div class="flow-diagram" id="flowDiagram"></div>`;
+  }
+
+  // Components
+  h += `<div class="section-title">Components</div><div class="comp-grid">`;
+  for (const comp of comps) {
+    const icon = COMP_ICONS[comp.type] || COMP_ICONS.other;
+    h += `<div class="comp-card" onclick="expandComp('${comp.path}')">
+      <div class="cc-hdr"><span class="cc-icon">${icon}</span><div><div class="cc-name">${comp.name}</div>
+      <div class="cc-tech">${(comp.tech_stack||[]).join(" · ")}</div></div></div>
+      ${comp.description ? `<div class="cc-desc">${esc(comp.description)}</div>` : ""}
+      <div class="cc-path">${comp.path}/ · ${(comp.files||[]).length} files</div>
+      ${(comp.api_routes||[]).length ? `<div style="font-size:10px;color:var(--fg3);margin-top:4px">${comp.api_routes.length} API routes</div>` : ""}
+    </div>`;
+  }
+  h += `</div>`;
+
+  // Category distribution
+  h += `<div class="section-title">File Distribution</div><div class="cat-bar">`;
+  for (const [cat,cnt] of cats) h += `<div class="cat-seg" style="width:${cnt/totalF*100}%;background:${CCOLORS[cat]||CCOLORS.other}" title="${cat}: ${cnt}"></div>`;
+  h += `</div><div class="cat-legend">`;
+  for (const [cat,cnt] of cats) h += `<div class="cl-item"><div class="cl-dot" style="background:${CCOLORS[cat]||CCOLORS.other}"></div>${cat} (${cnt})</div>`;
+  h += `</div>`;
+
+  // Languages
+  const langs = Object.entries(st.by_language||{}).sort((a,b)=>b[1]-a[1]);
+  h += `<div class="section-title">Languages</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;">`;
+  for (const [lang,cnt] of langs) {
+    h += `<div style="background:var(--bg2);border:1px solid var(--bg4);border-radius:6px;padding:10px;">
+      <div style="font-size:11px;color:var(--fg2)">${lang}</div>
+      <div style="font-size:18px;font-weight:600;color:var(--fg)">${cnt}</div>
+      <div style="height:3px;background:var(--bg4);border-radius:2px;margin-top:5px;"><div style="height:100%;background:var(--accent);border-radius:2px;width:${cnt/totalF*100}%"></div></div>
+    </div>`;
+  }
+  h += `</div>`;
+
+  c.innerHTML = h;
+
+  // Render SVG flow diagram after DOM is ready
+  if (flows.length > 0 && comps.length > 1) {
+    requestAnimationFrame(() => renderFlowDiagram(comps, flows));
+  }
+}
+
+function renderFlowDiagram(comps, flows) {
+  const container = document.getElementById("flowDiagram");
+  if (!container) return;
+
+  const W = container.clientWidth - 40;
+  const nodeW = 140, nodeH = 50, padX = 60, padY = 40;
+  const cols = Math.min(comps.length, Math.max(2, Math.floor(W / (nodeW + padX))));
+  const rows = Math.ceil(comps.length / cols);
+  const svgH = rows * (nodeH + padY) + padY;
+
+  // Position nodes
+  const positions = {};
+  comps.forEach((c, i) => {
+    const col = i % cols, row = Math.floor(i / cols);
+    positions[c.name] = {
+      x: padX + col * (nodeW + padX),
+      y: padY + row * (nodeH + padY),
+    };
+  });
+
+  let svg = `<svg width="${W+40}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">`;
+  svg += `<defs><marker id="ah" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/></marker></defs>`;
+
+  // Edges
+  for (const flow of flows) {
+    const from = positions[flow.source], to = positions[flow.target];
+    if (!from || !to) continue;
+    const x1 = from.x + nodeW/2, y1 = from.y + nodeH/2;
+    const x2 = to.x + nodeW/2, y2 = to.y + nodeH/2;
+    const mx = (x1+x2)/2, my = (y1+y2)/2;
+    svg += `<g class="flow-edge">`;
+    svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" marker-end="url(#ah)"/>`;
+    svg += `<text x="${mx}" y="${my-6}" text-anchor="middle" fill="#8b949e" font-size="10">${flow.protocol||""}</text>`;
+    svg += `</g>`;
+  }
+
+  // Nodes
+  for (const comp of comps) {
+    const p = positions[comp.name];
+    if (!p) continue;
+    const icon = COMP_ICONS[comp.type] || "";
+    svg += `<g class="flow-node" onclick="expandComp('${comp.path}')">`;
+    svg += `<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${nodeH}"/>`;
+    svg += `<text x="${p.x+nodeW/2}" y="${p.y+20}" text-anchor="middle" font-weight="600">${icon} ${comp.name}</text>`;
+    svg += `<text x="${p.x+nodeW/2}" y="${p.y+36}" text-anchor="middle" fill="#8b949e" font-size="10">${(comp.tech_stack||[])[0]||""}</text>`;
+    svg += `</g>`;
+  }
+
+  svg += `</svg>`;
+  container.innerHTML = svg;
+}
+
+function renderTabs() {
+  const b = document.getElementById("tabBar"); b.innerHTML = "";
+  for (const tab of S.openTabs) {
+    const d = document.createElement("div");
+    d.className = "tab"+(S.activeTab===tab.path?" active":"");
+    const nm = tab.path.split("/").pop(), dirty = S.dirty.has(tab.path);
+    d.innerHTML = `${dirty?'<span class="dot">●</span>':""}${nm}<span class="x" data-p="${tab.path}">&times;</span>`;
+    d.onclick = (e) => { if(e.target.classList.contains("x")){closeTab(e.target.dataset.p);return;} S.activeTab=tab.path; S.view="editor"; renderTabs(); renderEditor(); renderVB(); };
+    b.appendChild(d);
+  }
+}
+
+function renderEditor() {
+  const c = document.getElementById("editorView");
+  const tab = S.openTabs.find(t=>t.path===S.activeTab);
+  if (!tab) { c.innerHTML='<div style="padding:40px;text-align:center;color:var(--fg3)">Select a file</div>'; return; }
+  const lines = (tab.content||"").split("\n");
+  const nums = lines.map((_,i)=>i+1).join("\n");
+  const dirty = S.dirty.has(tab.path);
+  c.innerHTML = `<div class="ed-info"><span class="badge">${tab.lang||"text"}</span><span>${tab.path}</span>
+    <span>${fmtB(new Blob([tab.content||""]).size)}</span>
+    <button class="save-btn ${dirty?"show":""}" id="saveBtn">Save ⌘S</button></div>
+    <div class="ed-wrap"><pre class="ed-nums">${nums}</pre>
+    <textarea id="codeArea" spellcheck="false" class="ed-area">${esc(tab.content||"")}</textarea></div>`;
+  const ta = document.getElementById("codeArea");
+  ta.addEventListener("input", () => { tab.content=ta.value; S.dirty.add(tab.path); renderTabs(); document.getElementById("saveBtn")?.classList.add("show"); });
+  ta.addEventListener("keydown", (e) => {
+    if(e.key==="Tab"){e.preventDefault();const s=ta.selectionStart,en=ta.selectionEnd;ta.value=ta.value.substring(0,s)+"  "+ta.value.substring(en);ta.selectionStart=ta.selectionEnd=s+2;tab.content=ta.value;S.dirty.add(tab.path);}
+    if((e.ctrlKey||e.metaKey)&&e.key==="s"){e.preventDefault();saveCurrent();}
+  });
+  document.getElementById("saveBtn").onclick = saveCurrent;
+}
+
+function renderActivity() {
+  const c = document.getElementById("activityView");
+  if (!S.activities.length) { c.innerHTML='<div class="act-empty">Watching for file changes...<br><small style="color:var(--fg3)">Edit any file to see it here in real-time</small></div>'; return; }
+  c.innerHTML = S.activities.slice(0,100).map(a => {
+    const icons = {created:"+",modified:"~",deleted:"−",moved:"→"};
+    const cls = a.event==="deleted"?"del":a.event==="modified"?"mod":"add";
+    const t = new Date(a.timestamp*1000||a.timestamp).toLocaleTimeString();
+    return `<div class="act-item"><div class="act-ic ${cls}">${icons[a.event]||"?"}</div><div>
+      <div class="act-file" onclick="openFile('${a.path}')">${a.path}</div>
+      <div style="font-size:10px;color:var(--fg3)">${a.event}</div></div><div class="act-time">${t}</div></div>`;
+  }).join("");
+}
+
+function renderVB() {
+  document.querySelectorAll(".vb").forEach(b => b.classList.toggle("active", b.dataset.v===S.view));
+  document.getElementById("archView").classList.toggle("active", S.view==="arch");
+  document.getElementById("editorView").classList.toggle("active", S.view==="editor");
+  document.getElementById("activityView").classList.toggle("active", S.view==="activity");
+}
+
+// ─── Actions ───
+function openFile(p) { reqFile(p); }
+function closeTab(p) { S.openTabs=S.openTabs.filter(t=>t.path!==p); S.dirty.delete(p); if(S.activeTab===p){S.activeTab=S.openTabs.length?S.openTabs[S.openTabs.length-1].path:null; if(!S.activeTab)S.view="arch";} renderTabs(); renderEditor(); renderVB(); }
+function expandComp(p) { document.getElementById("treeFilter").value=p==="."?"":p; renderTree(); }
+function saveCurrent() { const t=S.openTabs.find(t=>t.path===S.activeTab); if(t)saveFile(t.path,t.content); }
+
+// ─── Utils ───
+function fmtB(b) { if(!b) return "0 B"; const k=1024,s=["B","KB","MB","GB"],i=Math.floor(Math.log(b)/Math.log(k)); return parseFloat((b/Math.pow(k,i)).toFixed(1))+" "+s[i]; }
+function esc(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function fileIcon(c) { return {backend:"🐍",frontend:"⚛️",config:"⚙️",style:"🎨",template:"📄",data:"🗄️",docs:"📝",docker:"🐳",ci:"⚡",shell:"💻",extension:"🧩",other:"📄"}[c]||"📄"; }
+function guessLang(p) { const e=p.split(".").pop()?.toLowerCase(); return {py:"python",js:"javascript",ts:"typescript",tsx:"typescript",jsx:"javascript",json:"json",yaml:"yaml",yml:"yaml",md:"markdown",html:"html",css:"css",sql:"sql",sh:"shell",toml:"toml"}[e]||"text"; }
+function mdToHtml(md) {
+  return md.replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>")
+    .replace(/^- (.+)$/gm,"<li>$1</li>")
+    .replace(/(<li>.*<\/li>)/s, (m) => `<ul>${m}</ul>`)
+    .replace(/\n\n/g,"<br><br>").replace(/\n/g,"<br>");
+}
+
+// ─── Events ───
+document.querySelectorAll(".vb").forEach(b => b.onclick = () => { S.view=b.dataset.v; renderVB(); if(S.view==="editor")renderEditor(); });
+document.getElementById("treeFilter").addEventListener("input", renderTree);
+document.getElementById("refreshBtn").onclick = () => { S.ws?.send(JSON.stringify({type:"refresh_ai"})); document.getElementById("refreshBtn").textContent="↻ Analyzing..."; setTimeout(()=>document.getElementById("refreshBtn").textContent="↻ Refresh", 30000); };
+
+let searchTO;
+document.getElementById("searchInput").addEventListener("input",(e)=>{
+  clearTimeout(searchTO); const q=e.target.value.trim();
+  if(!q){document.getElementById("searchResults").innerHTML="";return;}
+  searchTO=setTimeout(async()=>{
+    try{const r=await(await fetch(`/api/search?q=${encodeURIComponent(q)}`)).json();
+    const c=document.getElementById("searchResults");
+    if(!r.results?.length){c.innerHTML='<div style="padding:12px;color:var(--fg3);font-size:11px">No results</div>';return;}
+    c.innerHTML=r.results.map(r=>`<div class="sr" onclick="openFile('${r.file}')"><div class="sr-f">${r.file}</div><div class="sr-l">Line ${r.line}</div><div class="sr-t">${esc(r.text)}</div></div>`).join("");}catch{}
+  },300);
+});
+
+document.addEventListener("keydown",(e)=>{
+  if((e.ctrlKey||e.metaKey)&&e.key==="s"){e.preventDefault();saveCurrent();}
+  if((e.ctrlKey||e.metaKey)&&e.key==="p"){e.preventDefault();document.getElementById("treeFilter").focus();}
+});
+
+// ─── Settings Modal ───
+const settingsModal = document.getElementById("settingsModal");
+const KEY_PLACEHOLDERS = { ollama: "ollama-...", openai: "sk-...", anthropic: "sk-ant-...", groq: "gsk_..." };
+let _providerData = {};
+
+async function loadKeyStatus() {
+  try {
+    const r = await (await fetch("/api/keys")).json();
+    _providerData = r.providers || {};
+    const rows = document.getElementById("keyRows");
+    rows.innerHTML = "";
+    const order = ["ollama", "openai", "anthropic", "groq"];
+    for (const id of order) {
+      const info = _providerData[id];
+      if (!info) continue;
+      const ph = KEY_PLACEHOLDERS[id] || "";
+      const models = info.models || [];
+      const selectedModel = info.selected_model || info.default_model || "";
+      const hasKey = info.configured;
+
+      let modelOpts = "";
+      for (const m of models) {
+        const sel = m.id === selectedModel ? " selected" : "";
+        const rec = m.recommended ? " ★ Recommended" : "";
+        modelOpts += `<option value="${m.id}"${sel}>${m.name}${rec}</option>`;
+      }
+
+      rows.innerHTML += `<div class="key-row" data-provider="${id}">
+        <label><span class="status-dot ${hasKey ? "ok" : ""}"></span> ${info.display} <span style="font-size:10px;color:var(--fg3)">(${info.env_var})</span></label>
+        <input type="password" id="key_${id}" placeholder="${hasKey ? "••••••• (configured)" : ph}" autocomplete="off"/>
+        <div class="model-label">Model: ${hasKey ? "" : '<span style="font-size:9px;color:var(--fg3)">enter key to unlock</span>'}</div>
+        <select id="model_${id}" ${hasKey ? "" : "disabled"}>${modelOpts}</select>
+        <div class="hint">${models.find(m => m.id === selectedModel)?.description || ""}</div>
+      </div>`;
+    }
+
+    // Wire up key inputs to enable/disable model dropdowns live
+    for (const id of order) {
+      const keyInput = document.getElementById(`key_${id}`);
+      const modelSelect = document.getElementById(`model_${id}`);
+      if (keyInput && modelSelect) {
+        keyInput.addEventListener("input", () => {
+          const hasValue = keyInput.value.trim().length > 0 || _providerData[id]?.configured;
+          modelSelect.disabled = !hasValue;
+          const label = keyInput.closest(".key-row").querySelector(".model-label");
+          if (label) label.innerHTML = hasValue ? "Model:" : 'Model: <span style="font-size:9px;color:var(--fg3)">enter key to unlock</span>';
+        });
+        modelSelect.addEventListener("change", () => {
+          const hint = modelSelect.closest(".key-row").querySelector(".hint");
+          const models = _providerData[id]?.models || [];
+          const m = models.find(m => m.id === modelSelect.value);
+          if (hint && m) hint.textContent = m.description;
+        });
+      }
+    }
+
+    document.getElementById("activeProvider").textContent = r.active_provider || "none";
+    const activeModel = _providerData[r.active_provider]?.selected_model || "";
+    document.getElementById("activeModel").textContent = activeModel ? `(${activeModel})` : "";
+    return r;
+  } catch { return null; }
+}
+
+document.getElementById("settingsBtn").onclick = async () => {
+  await loadKeyStatus();
+  settingsModal.classList.add("show");
+};
+document.getElementById("cancelKeysBtn").onclick = () => settingsModal.classList.remove("show");
+settingsModal.onclick = (e) => { if (e.target === settingsModal) settingsModal.classList.remove("show"); };
+
+document.getElementById("saveKeysBtn").onclick = async () => {
+  const keys = {};
+  const selected_models = {};
+  const order = ["ollama", "openai", "anthropic", "groq"];
+
+  for (const id of order) {
+    const keyInput = document.getElementById(`key_${id}`);
+    const modelSelect = document.getElementById(`model_${id}`);
+    if (keyInput && keyInput.value.trim()) keys[id] = keyInput.value.trim();
+    if (modelSelect && !modelSelect.disabled) selected_models[id] = modelSelect.value;
+  }
+
+  // Must have at least one key (new or existing)
+  const hasAnyKey = Object.keys(keys).length > 0 || Object.values(_providerData).some(p => p.configured);
+  const hasNewKey = Object.keys(keys).length > 0;
+  const hasModelChange = Object.keys(selected_models).length > 0;
+  if (!hasNewKey && !hasModelChange) { alert("Enter at least one API key or change a model selection."); return; }
+
+  document.getElementById("saveKeysBtn").textContent = "Saving...";
+  try {
+    const r = await (await fetch("/api/keys", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ keys, selected_models }),
+    })).json();
+    document.getElementById("activeProvider").textContent = r.active_provider || "—";
+    document.getElementById("activeModel").textContent = r.selected_model ? `(${r.selected_model})` : "";
+    settingsModal.classList.remove("show");
+    const badge = document.getElementById("aiBadge");
+    badge.textContent = "AI ⟳"; badge.className = "ai-badge";
+  } catch (err) { alert("Failed to save: " + err.message); }
+  document.getElementById("saveKeysBtn").textContent = "Save & Analyze";
+};
+
+// Auto-show settings on first load if no AI keys
+async function checkFirstRun() {
+  try {
+    const r = await (await fetch("/api/keys")).json();
+    const anyConfigured = Object.values(r.providers || {}).some(p => p.configured);
+    if (!anyConfigured && !r.ai_enabled) {
+      await loadKeyStatus();
+      settingsModal.classList.add("show");
+    }
+  } catch {}
+}
+
+connectWS();
+setTimeout(checkFirstRun, 1500);
+</script>
+</body>
+</html>

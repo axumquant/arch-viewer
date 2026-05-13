@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arch Viewer — DevKit</title>
+<style>
+  :root {
+    --bg: #0d1117; --bg2: #161b22; --bg3: #21262d; --bg4: #30363d;
+    --fg: #c9d1d9; --fg2: #8b949e; --fg3: #484f58;
+    --accent: #58a6ff; --accent2: #388bfd; --green: #3fb950;
+    --yellow: #d29922; --red: #f85149; --purple: #bc8cff;
+    --orange: #d18616;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+    --radius: 8px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--fg);
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ─── Header ─── */
+  .header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 12px 20px; background: var(--bg2);
+    border-bottom: 1px solid var(--bg4);
+    flex-shrink: 0;
+  }
+  .header .logo { font-size: 20px; font-weight: 700; color: var(--accent); }
+  .header .project-name { font-size: 14px; color: var(--fg2); }
+  .header .stats { margin-left: auto; display: flex; gap: 16px; font-size: 12px; color: var(--fg2); }
+  .header .stat-val { color: var(--fg); font-weight: 600; }
+  .header .connection {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--red); transition: background 0.3s;
+  }
+  .header .connection.connected { background: var(--green); }
+
+  /* ─── Main Layout ─── */
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ─── Sidebar (File Tree) ─── */
+  .sidebar {
+    width: 280px; min-width: 200px; max-width: 400px;
+    background: var(--bg2); border-right: 1px solid var(--bg4);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .sidebar-header {
+    padding: 12px 16px; border-bottom: 1px solid var(--bg4);
+    display: flex; align-items: center; gap: 8px;
+    flex-shrink: 0;
+  }
+  .sidebar-header input {
+    flex: 1; background: var(--bg3); border: 1px solid var(--bg4);
+    border-radius: 6px; padding: 6px 10px; color: var(--fg);
+    font-size: 12px; outline: none;
+  }
+  .sidebar-header input:focus { border-color: var(--accent); }
+  .file-tree { flex: 1; overflow-y: auto; padding: 8px 0; font-size: 13px; }
+  .tree-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 16px; cursor: pointer; white-space: nowrap;
+    user-select: none; transition: background 0.1s;
+  }
+  .tree-item:hover { background: var(--bg3); }
+  .tree-item.active { background: var(--accent2); color: #fff; }
+  .tree-item .icon { width: 16px; text-align: center; font-size: 12px; flex-shrink: 0; }
+  .tree-item .name { overflow: hidden; text-overflow: ellipsis; }
+  .tree-item.changed { animation: pulse-change 1s ease-out; }
+
+  @keyframes pulse-change {
+    0% { background: rgba(63, 185, 80, 0.3); }
+    100% { background: transparent; }
+  }
+
+  /* ─── Center Panel ─── */
+  .center { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* Tabs */
+  .tabs {
+    display: flex; gap: 0; background: var(--bg2);
+    border-bottom: 1px solid var(--bg4); flex-shrink: 0;
+    overflow-x: auto;
+  }
+  .tab {
+    padding: 8px 16px; font-size: 12px; cursor: pointer;
+    border-bottom: 2px solid transparent; color: var(--fg2);
+    display: flex; align-items: center; gap: 6px; white-space: nowrap;
+    transition: all 0.15s;
+  }
+  .tab:hover { color: var(--fg); background: var(--bg3); }
+  .tab.active { color: var(--fg); border-bottom-color: var(--accent); background: var(--bg); }
+  .tab .close {
+    width: 16px; height: 16px; display: flex; align-items: center;
+    justify-content: center; border-radius: 3px; font-size: 14px;
+    opacity: 0; transition: opacity 0.15s;
+  }
+  .tab:hover .close { opacity: 0.7; }
+  .tab .close:hover { opacity: 1; background: var(--bg4); }
+  .tab .modified { color: var(--yellow); font-size: 8px; }
+
+  /* View toggle */
+  .view-bar {
+    display: flex; gap: 0; padding: 4px 12px; background: var(--bg2);
+    border-bottom: 1px solid var(--bg4); flex-shrink: 0;
+  }
+  .view-btn {
+    padding: 4px 12px; font-size: 11px; cursor: pointer;
+    background: none; border: 1px solid var(--bg4); color: var(--fg2);
+    transition: all 0.15s;
+  }
+  .view-btn:first-child { border-radius: 4px 0 0 4px; }
+  .view-btn:last-child { border-radius: 0 4px 4px 0; }
+  .view-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* Content area */
+  .content { flex: 1; overflow: hidden; position: relative; }
+
+  /* ─── Editor Panel ─── */
+  .editor-wrap {
+    width: 100%; height: 100%; overflow: auto;
+    display: none; flex-direction: column;
+  }
+  .editor-wrap.active { display: flex; }
+  .editor-info {
+    padding: 8px 16px; font-size: 11px; color: var(--fg2);
+    background: var(--bg2); border-bottom: 1px solid var(--bg4);
+    display: flex; gap: 16px; align-items: center; flex-shrink: 0;
+  }
+  .editor-info .lang-badge {
+    background: var(--bg4); padding: 2px 8px; border-radius: 4px;
+    font-size: 10px; text-transform: uppercase;
+  }
+  .editor-info .save-btn {
+    margin-left: auto; padding: 4px 12px; background: var(--green);
+    color: #fff; border: none; border-radius: 4px; cursor: pointer;
+    font-size: 11px; opacity: 0; transition: opacity 0.2s;
+  }
+  .editor-info .save-btn.visible { opacity: 1; }
+  .code-editor {
+    flex: 1; overflow: auto; padding: 12px; font-family: var(--mono);
+    font-size: 13px; line-height: 1.6; tab-size: 4; white-space: pre;
+    outline: none; color: var(--fg); background: var(--bg);
+  }
+  .code-editor .line-numbers {
+    float: left; text-align: right; padding-right: 16px; margin-right: 16px;
+    color: var(--fg3); border-right: 1px solid var(--bg4);
+    user-select: none; min-width: 40px;
+  }
+
+  /* ─── Architecture View ─── */
+  .arch-view {
+    width: 100%; height: 100%; overflow: auto; padding: 24px;
+    display: none;
+  }
+  .arch-view.active { display: block; }
+
+  .component-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px; margin-bottom: 24px;
+  }
+  .component-card {
+    background: var(--bg2); border: 1px solid var(--bg4); border-radius: var(--radius);
+    padding: 16px; cursor: pointer; transition: all 0.2s;
+  }
+  .component-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .component-card .card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .component-card .card-icon { font-size: 24px; }
+  .component-card .card-title { font-size: 15px; font-weight: 600; }
+  .component-card .card-tech { font-size: 12px; color: var(--fg2); }
+  .component-card .card-path { font-size: 11px; color: var(--fg3); font-family: var(--mono); }
+  .component-card .card-files { font-size: 12px; color: var(--fg2); margin-top: 8px; }
+
+  /* Stats grid */
+  .stats-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px; margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--bg2); border: 1px solid var(--bg4); border-radius: var(--radius);
+    padding: 16px;
+  }
+  .stat-card .stat-label { font-size: 11px; color: var(--fg2); text-transform: uppercase; letter-spacing: 1px; }
+  .stat-card .stat-number { font-size: 28px; font-weight: 700; color: var(--accent); }
+
+  /* Category breakdown */
+  .cat-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+  .cat-segment { transition: width 0.3s; }
+  .cat-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+  .cat-legend-item { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--fg2); }
+  .cat-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+  /* ─── Activity Feed ─── */
+  .activity-view {
+    width: 100%; height: 100%; overflow: auto; padding: 16px;
+    display: none;
+  }
+  .activity-view.active { display: block; }
+
+  .activity-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 12px; border-bottom: 1px solid var(--bg3);
+    animation: slide-in 0.3s ease-out;
+  }
+  @keyframes slide-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .activity-icon { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+  .activity-icon.add { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+  .activity-icon.change { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+  .activity-icon.unlink { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+  .activity-file { font-family: var(--mono); font-size: 12px; color: var(--fg); cursor: pointer; }
+  .activity-file:hover { color: var(--accent); text-decoration: underline; }
+  .activity-time { margin-left: auto; font-size: 11px; color: var(--fg3); }
+  .activity-empty { padding: 40px; text-align: center; color: var(--fg3); }
+
+  /* ─── Right Panel (Search + Info) ─── */
+  .right-panel {
+    width: 300px; background: var(--bg2); border-left: 1px solid var(--bg4);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .right-panel.collapsed { width: 0; min-width: 0; border: none; }
+  .search-box {
+    padding: 12px; border-bottom: 1px solid var(--bg4); flex-shrink: 0;
+  }
+  .search-box input {
+    width: 100%; background: var(--bg3); border: 1px solid var(--bg4);
+    border-radius: 6px; padding: 8px 12px; color: var(--fg);
+    font-size: 13px; outline: none;
+  }
+  .search-box input:focus { border-color: var(--accent); }
+  .search-results { flex: 1; overflow-y: auto; padding: 8px; }
+  .search-result {
+    padding: 8px 12px; border-radius: 6px; cursor: pointer;
+    margin-bottom: 4px; transition: background 0.1s;
+  }
+  .search-result:hover { background: var(--bg3); }
+  .search-result .sr-file { font-size: 12px; color: var(--accent); font-family: var(--mono); }
+  .search-result .sr-line { font-size: 11px; color: var(--fg3); }
+  .search-result .sr-text { font-size: 12px; color: var(--fg2); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--fg3); }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .sidebar { width: 220px; }
+    .right-panel { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="logo">⚡ Arch Viewer</div>
+  <div class="project-name" id="projectName">Loading...</div>
+  <div class="stats">
+    <span><span class="stat-val" id="statFiles">—</span> files</span>
+    <span><span class="stat-val" id="statSize">—</span></span>
+  </div>
+  <div class="connection" id="wsStatus" title="WebSocket"></div>
+</div>
+
+<!-- Main Layout -->
+<div class="main">
+
+  <!-- Sidebar: File Tree -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <input type="text" id="treeFilter" placeholder="Filter files..." />
+    </div>
+    <div class="file-tree" id="fileTree"></div>
+  </div>
+
+  <!-- Center Panel -->
+  <div class="center">
+    <!-- Tabs -->
+    <div class="tabs" id="tabBar"></div>
+    <!-- View toggle -->
+    <div class="view-bar">
+      <button class="view-btn active" data-view="arch">Architecture</button>
+      <button class="view-btn" data-view="editor">Editor</button>
+      <button class="view-btn" data-view="activity">Activity</button>
+    </div>
+    <!-- Content -->
+    <div class="content">
+      <div class="arch-view active" id="archView"></div>
+      <div class="editor-wrap" id="editorView"></div>
+      <div class="activity-view" id="activityView">
+        <div class="activity-empty">Watching for file changes...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right Panel: Search -->
+  <div class="right-panel" id="rightPanel">
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="Search across files..." />
+    </div>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+
+</div>
+
+<script>
+// ─── State ───
+const state = {
+  tree: null,
+  files: [],
+  stats: null,
+  components: [],
+  openTabs: [],      // { path, content, modified, language }
+  activeTab: null,    // path
+  activeView: "arch", // "arch" | "editor" | "activity"
+  activities: [],
+  ws: null,
+  dirtyFiles: new Set(),
+};
+
+const CAT_COLORS = {
+  backend: "#3fb950", frontend: "#58a6ff", config: "#d29922",
+  style: "#bc8cff", template: "#f0883e", data: "#a371f7",
+  docs: "#8b949e", docker: "#2ea9df", ci: "#d18616",
+  shell: "#79c0ff", extension: "#f778ba", other: "#484f58",
+};
+
+// ─── WebSocket ───
+function connectWS() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${proto}//${location.host}`);
+  state.ws = ws;
+
+  ws.onopen = () => {
+    document.getElementById("wsStatus").classList.add("connected");
+    document.getElementById("wsStatus").title = "Connected";
+  };
+
+  ws.onclose = () => {
+    document.getElementById("wsStatus").classList.remove("connected");
+    document.getElementById("wsStatus").title = "Disconnected — reconnecting...";
+    setTimeout(connectWS, 2000);
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+
+    if (msg.type === "init") {
+      state.tree = msg.tree;
+      state.files = msg.files;
+      state.stats = msg.stats;
+      state.components = msg.components;
+      document.getElementById("projectName").textContent = msg.root;
+      renderAll();
+    }
+
+    if (msg.type === "file_change") {
+      handleFileChange(msg);
+    }
+
+    if (msg.type === "file_content") {
+      handleFileContent(msg);
+    }
+
+    if (msg.type === "file_saved") {
+      state.dirtyFiles.delete(msg.path);
+      renderTabs();
+    }
+  };
+}
+
+function handleFileChange(ev) {
+  // Add to activity feed
+  state.activities.unshift(ev);
+  if (state.activities.length > 200) state.activities.pop();
+  renderActivity();
+
+  // Highlight in tree
+  const el = document.querySelector(`.tree-item[data-path="${CSS.escape(ev.path)}"]`);
+  if (el) {
+    el.classList.add("changed");
+    setTimeout(() => el.classList.remove("changed"), 1500);
+  }
+
+  // If file is open in a tab, reload it
+  const tab = state.openTabs.find(t => t.path === ev.path);
+  if (tab && !state.dirtyFiles.has(ev.path)) {
+    requestFile(ev.path);
+  }
+
+  // Request rescan for add/unlink events
+  if (ev.event === "add" || ev.event === "unlink" || ev.event === "addDir" || ev.event === "unlinkDir") {
+    state.ws.send(JSON.stringify({ type: "rescan" }));
+  }
+}
+
+function handleFileContent(msg) {
+  let tab = state.openTabs.find(t => t.path === msg.path);
+  if (!tab) {
+    tab = { path: msg.path, content: msg.content, language: guessLang(msg.path) };
+    state.openTabs.push(tab);
+  } else {
+    tab.content = msg.content;
+  }
+  state.activeTab = msg.path;
+  state.activeView = "editor";
+  renderTabs();
+  renderEditor();
+  renderViewBtns();
+}
+
+function requestFile(filePath) {
+  if (state.ws && state.ws.readyState === 1) {
+    state.ws.send(JSON.stringify({ type: "read_file", path: filePath }));
+  }
+}
+
+function saveFile(filePath, content) {
+  if (state.ws && state.ws.readyState === 1) {
+    state.ws.send(JSON.stringify({ type: "save_file", path: filePath, content }));
+  }
+}
+
+// ─── Rendering ───
+
+function renderAll() {
+  renderStats();
+  renderTree();
+  renderArch();
+  renderTabs();
+  renderActivity();
+}
+
+function renderStats() {
+  document.getElementById("statFiles").textContent = state.stats?.totalFiles || 0;
+  document.getElementById("statSize").textContent = formatBytes(state.stats?.totalSize || 0);
+}
+
+function renderTree() {
+  const container = document.getElementById("fileTree");
+  const filter = document.getElementById("treeFilter").value.toLowerCase();
+  container.innerHTML = "";
+  if (!state.tree) return;
+  renderTreeNode(container, state.tree, 0, filter);
+}
+
+function renderTreeNode(container, node, depth, filter) {
+  if (!node || !node.children) return;
+  for (const child of node.children) {
+    if (filter && child.type === "file" && !child.name.toLowerCase().includes(filter) && !child.path.toLowerCase().includes(filter)) {
+      continue;
+    }
+
+    const div = document.createElement("div");
+    div.className = "tree-item" + (state.activeTab === child.path ? " active" : "");
+    div.style.paddingLeft = (16 + depth * 16) + "px";
+    div.dataset.path = child.path;
+
+    const icon = document.createElement("span");
+    icon.className = "icon";
+
+    if (child.type === "directory") {
+      icon.textContent = "📁";
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = child.name;
+      div.appendChild(icon);
+      div.appendChild(name);
+      div.onclick = (e) => {
+        e.stopPropagation();
+        div.classList.toggle("collapsed");
+        const sub = div.nextElementSibling;
+        // Toggle children visibility handled by CSS
+      };
+      container.appendChild(div);
+
+      if (!filter || child.children.some(c => c.name.toLowerCase().includes(filter) || c.path.toLowerCase().includes(filter))) {
+        renderTreeNode(container, child, depth + 1, filter);
+      }
+    } else {
+      icon.textContent = fileIcon(child.category);
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = child.name;
+      div.appendChild(icon);
+      div.appendChild(name);
+      div.onclick = () => openFile(child.path);
+      container.appendChild(div);
+    }
+  }
+}
+
+function renderTabs() {
+  const bar = document.getElementById("tabBar");
+  bar.innerHTML = "";
+  for (const tab of state.openTabs) {
+    const div = document.createElement("div");
+    div.className = "tab" + (state.activeTab === tab.path ? " active" : "");
+    const name = tab.path.split("/").pop();
+    const isDirty = state.dirtyFiles.has(tab.path);
+    div.innerHTML = `${isDirty ? '<span class="modified">●</span>' : ""}${name}<span class="close" data-path="${tab.path}">&times;</span>`;
+    div.onclick = (e) => {
+      if (e.target.classList.contains("close")) {
+        closeTab(e.target.dataset.path);
+        return;
+      }
+      state.activeTab = tab.path;
+      state.activeView = "editor";
+      renderTabs();
+      renderEditor();
+      renderViewBtns();
+    };
+    bar.appendChild(div);
+  }
+}
+
+function renderEditor() {
+  const container = document.getElementById("editorView");
+  const tab = state.openTabs.find(t => t.path === state.activeTab);
+  if (!tab) {
+    container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--fg3)">Select a file to edit</div>';
+    return;
+  }
+
+  const lines = (tab.content || "").split("\n");
+  const lineNums = lines.map((_, i) => i + 1).join("\n");
+  const isDirty = state.dirtyFiles.has(tab.path);
+
+  container.innerHTML = `
+    <div class="editor-info">
+      <span class="lang-badge">${tab.language || "text"}</span>
+      <span>${tab.path}</span>
+      <span>${formatBytes(new Blob([tab.content || ""]).size)}</span>
+      <button class="save-btn ${isDirty ? "visible" : ""}" id="saveBtn">Save (Ctrl+S)</button>
+    </div>
+    <div class="code-editor-wrap" style="flex:1;overflow:auto;display:flex;">
+      <pre class="code-editor-lines" style="padding:12px 0 12px 12px;font-family:var(--mono);font-size:13px;line-height:1.6;color:var(--fg3);text-align:right;user-select:none;border-right:1px solid var(--bg4);min-width:48px;">${lineNums}</pre>
+      <textarea id="codeArea" spellcheck="false" style="flex:1;background:var(--bg);color:var(--fg);border:none;outline:none;padding:12px;font-family:var(--mono);font-size:13px;line-height:1.6;tab-size:4;resize:none;white-space:pre;overflow-wrap:normal;overflow-x:auto;">${escapeHtml(tab.content || "")}</textarea>
+    </div>
+  `;
+
+  const textarea = document.getElementById("codeArea");
+  textarea.addEventListener("input", () => {
+    const newContent = textarea.value;
+    tab.content = newContent;
+    state.dirtyFiles.add(tab.path);
+    renderTabs();
+    document.getElementById("saveBtn").classList.add("visible");
+  });
+
+  // Tab key support
+  textarea.addEventListener("keydown", (e) => {
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      textarea.value = textarea.value.substring(0, start) + "  " + textarea.value.substring(end);
+      textarea.selectionStart = textarea.selectionEnd = start + 2;
+      tab.content = textarea.value;
+      state.dirtyFiles.add(tab.path);
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+      e.preventDefault();
+      saveCurrentFile();
+    }
+  });
+
+  document.getElementById("saveBtn").onclick = saveCurrentFile;
+}
+
+function saveCurrentFile() {
+  const tab = state.openTabs.find(t => t.path === state.activeTab);
+  if (!tab) return;
+  saveFile(tab.path, tab.content);
+}
+
+function renderArch() {
+  const container = document.getElementById("archView");
+  if (!state.stats || !state.components) {
+    container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--fg3)">Scanning project...</div>';
+    return;
+  }
+
+  const s = state.stats;
+  const catEntries = Object.entries(s.byCategory).sort((a, b) => b[1] - a[1]);
+  const totalFiles = s.totalFiles || 1;
+
+  let html = `
+    <h2 style="color:var(--fg);margin-bottom:16px;">Project Architecture</h2>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Total Files</div>
+        <div class="stat-number">${s.totalFiles}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total Size</div>
+        <div class="stat-number">${formatBytes(s.totalSize)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Languages</div>
+        <div class="stat-number">${Object.keys(s.byLanguage).length}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Components</div>
+        <div class="stat-number">${state.components.length}</div>
+      </div>
+    </div>
+
+    <h3 style="color:var(--fg);margin-bottom:12px;">Components</h3>
+    <div class="component-grid">
+      ${state.components.map(c => `
+        <div class="component-card" onclick="expandComponent('${c.path}')">
+          <div class="card-header">
+            <span class="card-icon">${c.icon}</span>
+            <div>
+              <div class="card-title">${c.name}</div>
+              <div class="card-tech">${c.tech}</div>
+            </div>
+          </div>
+          <div class="card-path">${c.path}/</div>
+        </div>
+      `).join("")}
+    </div>
+
+    <h3 style="color:var(--fg);margin:24px 0 12px;">File Distribution</h3>
+    <div class="cat-bar">
+      ${catEntries.map(([cat, count]) => `
+        <div class="cat-segment" style="width:${(count/totalFiles*100)}%;background:${CAT_COLORS[cat]||CAT_COLORS.other}" title="${cat}: ${count}"></div>
+      `).join("")}
+    </div>
+    <div class="cat-legend">
+      ${catEntries.map(([cat, count]) => `
+        <div class="cat-legend-item">
+          <div class="cat-dot" style="background:${CAT_COLORS[cat]||CAT_COLORS.other}"></div>
+          ${cat} (${count})
+        </div>
+      `).join("")}
+    </div>
+
+    <h3 style="color:var(--fg);margin:24px 0 12px;">Language Breakdown</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;">
+      ${Object.entries(s.byLanguage).sort((a,b)=>b[1]-a[1]).map(([lang, count]) => `
+        <div style="background:var(--bg2);border:1px solid var(--bg4);border-radius:6px;padding:10px;">
+          <div style="font-size:12px;color:var(--fg2)">${lang}</div>
+          <div style="font-size:20px;font-weight:600;color:var(--fg)">${count}</div>
+          <div style="height:3px;background:var(--bg4);border-radius:2px;margin-top:6px;">
+            <div style="height:100%;background:var(--accent);border-radius:2px;width:${(count/totalFiles*100)}%"></div>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+
+  container.innerHTML = html;
+}
+
+function renderActivity() {
+  const container = document.getElementById("activityView");
+  if (state.activities.length === 0) {
+    container.innerHTML = '<div class="activity-empty">Watching for file changes...<br><small style="color:var(--fg3)">Edit any file and see it appear here in real-time</small></div>';
+    return;
+  }
+
+  container.innerHTML = state.activities.slice(0, 100).map(a => {
+    const icons = { add: "+", change: "~", unlink: "−", addDir: "+", unlinkDir: "−" };
+    const cls = a.event.includes("unlink") ? "unlink" : a.event === "change" ? "change" : "add";
+    const time = new Date(a.timestamp).toLocaleTimeString();
+    return `
+      <div class="activity-item">
+        <div class="activity-icon ${cls}">${icons[a.event] || "?"}</div>
+        <div>
+          <div class="activity-file" onclick="openFile('${a.path}')">${a.path}</div>
+          <div style="font-size:11px;color:var(--fg3)">${a.event} · ${a.category}</div>
+        </div>
+        <div class="activity-time">${time}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderViewBtns() {
+  document.querySelectorAll(".view-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.view === state.activeView);
+  });
+  document.getElementById("archView").classList.toggle("active", state.activeView === "arch");
+  document.getElementById("editorView").classList.toggle("active", state.activeView === "editor");
+  document.getElementById("activityView").classList.toggle("active", state.activeView === "activity");
+}
+
+// ─── Actions ───
+
+function openFile(filePath) {
+  requestFile(filePath);
+}
+
+function closeTab(filePath) {
+  state.openTabs = state.openTabs.filter(t => t.path !== filePath);
+  state.dirtyFiles.delete(filePath);
+  if (state.activeTab === filePath) {
+    state.activeTab = state.openTabs.length > 0 ? state.openTabs[state.openTabs.length - 1].path : null;
+    if (!state.activeTab) state.activeView = "arch";
+  }
+  renderTabs();
+  renderEditor();
+  renderViewBtns();
+}
+
+function expandComponent(componentPath) {
+  // Filter tree to show component
+  document.getElementById("treeFilter").value = componentPath === "." ? "" : componentPath;
+  renderTree();
+}
+
+// ─── Utilities ───
+
+function formatBytes(bytes) {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function fileIcon(category) {
+  const icons = {
+    backend: "🐍", frontend: "⚛️", config: "⚙️", style: "🎨",
+    template: "📄", data: "🗄️", docs: "📝", docker: "🐳",
+    ci: "⚡", shell: "💻", extension: "🧩", other: "📄",
+  };
+  return icons[category] || "📄";
+}
+
+function guessLang(filePath) {
+  const ext = filePath.split(".").pop().toLowerCase();
+  const map = {
+    py: "python", js: "javascript", ts: "typescript", tsx: "typescript",
+    jsx: "javascript", json: "json", yaml: "yaml", yml: "yaml",
+    md: "markdown", html: "html", css: "css", sql: "sql",
+    sh: "shell", toml: "toml", rs: "rust", go: "go",
+  };
+  return map[ext] || "text";
+}
+
+// ─── Event Handlers ───
+
+document.querySelectorAll(".view-btn").forEach(btn => {
+  btn.onclick = () => {
+    state.activeView = btn.dataset.view;
+    renderViewBtns();
+    if (state.activeView === "editor") renderEditor();
+  };
+});
+
+document.getElementById("treeFilter").addEventListener("input", renderTree);
+
+// Search
+let searchTimeout;
+document.getElementById("searchInput").addEventListener("input", (e) => {
+  clearTimeout(searchTimeout);
+  const q = e.target.value.trim();
+  if (!q) { document.getElementById("searchResults").innerHTML = ""; return; }
+  searchTimeout = setTimeout(async () => {
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      const container = document.getElementById("searchResults");
+      if (data.results.length === 0) {
+        container.innerHTML = '<div style="padding:16px;color:var(--fg3);font-size:12px;">No results</div>';
+        return;
+      }
+      container.innerHTML = data.results.map(r => `
+        <div class="search-result" onclick="openFile('${r.file}')">
+          <div class="sr-file">${r.file}</div>
+          <div class="sr-line">Line ${r.line}</div>
+          <div class="sr-text">${escapeHtml(r.text)}</div>
+        </div>
+      `).join("");
+    } catch { /* ignore */ }
+  }, 300);
+});
+
+// Global keyboard shortcut
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+    e.preventDefault();
+    saveCurrentFile();
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === "p") {
+    e.preventDefault();
+    document.getElementById("treeFilter").focus();
+  }
+});
+
+// ─── Init ───
+connectWS();
+</script>
+</body>
+</html>

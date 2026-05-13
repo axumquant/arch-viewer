@@ -1,0 +1,32 @@
+# arch-viewer configuration
+# Copy to config.yaml and customize
+
+# LLM provider for AI analysis (online only)
+# Options: openai, anthropic, groq
+provider: openai
+
+# Model override (optional — defaults per provider)
+# model: gpt-4o-mini       # openai (default)
+# model: claude-sonnet-4-20250514  # anthropic
+# model: llama-3.1-70b-versatile  # groq
+
+# Web dashboard port
+port: 3777
+
+# Auto-open browser on start
+auto_open: true
+
+# Disable AI analysis (static scan only)
+# no_ai: true
+
+# Max files to scan
+max_files: 5000
+
+# Directories to ignore (in addition to defaults)
+# extra_ignore:
+#   - data/
+#   - logs/
+
+# API keys — prefer .arch-viewer.keys.json or environment variables
+# The web dashboard has a settings panel to enter keys on first use.
+# Keys file is auto-created and should be in .gitignore.

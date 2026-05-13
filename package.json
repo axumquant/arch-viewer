@@ -1,0 +1,45 @@
+{
+  "name": "arch-viewer",
+  "version": "2.0.0",
+  "description": "MCP-native architecture viewer with AI-powered codebase analysis, AST parsing, architecture scoring, dependency graphs, and interactive dashboard",
+  "bin": {
+    "arch-viewer": "./src/cli.js"
+  },
+  "main": "./src/server.js",
+  "scripts": {
+    "start": "node src/cli.js",
+    "dev": "node src/cli.js --watch"
+  },
+  "keywords": [
+    "architecture",
+    "visualization",
+    "mcp",
+    "code-analysis",
+    "ast",
+    "dependency-graph",
+    "codebase",
+    "devtools",
+    "file-watcher",
+    "code-viewer"
+  ],
+  "author": "axumquant",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/axumquant/arch-viewer.git"
+  },
+  "homepage": "https://github.com/axumquant/arch-viewer",
+  "bugs": {
+    "url": "https://github.com/axumquant/arch-viewer/issues"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "express": "^4.21.0",
+    "ws": "^8.18.0",
+    "minimist": "^1.2.8",
+    "open": "^10.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
