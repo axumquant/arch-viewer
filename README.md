@@ -129,6 +129,55 @@ The web dashboard has a settings panel to enter keys and select models on first 
 
 ---
 
+## Optional: Graph + Memory Stack
+
+arch-viewer can persist its findings into a real graph database and a
+semantic memory store. This is entirely opt-in — the flat-file memory at
+`.arch_viewer/memory.json` keeps working if you skip this section.
+
+### 1. Start the stores
+
+```bash
+cp .env.example .env              # tweak NEO4J_PASSWORD if you like
+docker compose up -d neo4j qdrant
+```
+
+- **Neo4j** — component / dependency knowledge graph. Browser UI at
+  [http://localhost:7474](http://localhost:7474) (login `neo4j` /
+  `archviewer123`). Bolt port `7687`.
+- **Qdrant** — vector store used by Mem0 for semantic memory. REST API on
+  port `6333`.
+
+To also run arch-viewer itself inside compose:
+
+```bash
+docker compose --profile app up -d
+```
+
+### 2. Install the Python clients
+
+```bash
+pip install -e ".[graph]"
+```
+
+This pulls in `neo4j`, `mem0ai`, and `qdrant-client`. None of them are
+required for the core app — without them the graph store and Mem0 silently
+fall back to no-ops.
+
+### 3. What you get
+
+| Store | What it adds | When it's used |
+|-------|--------------|----------------|
+| Neo4j | A queryable graph of every component, dependency, and data flow per project. Browse it at http://localhost:7474. | After every analysis, `sync_architecture_to_graph` upserts the current snapshot. |
+| Mem0 (Qdrant + OpenAI embeddings) | Semantic recall of past patterns and user corrections, scoped per project. | Every `add_pattern` / `add_correction` is mirrored from the flat file into Mem0, and `get_context_for_analysis` pulls the top-relevant memories before each AI run. |
+
+Project isolation: every Neo4j node carries a deterministic `project_id`
+hash of the absolute project root, and every Mem0 entry uses a
+project-scoped `user_id`. Multiple projects share the same stores without
+collisions.
+
+---
+
 ## Project Structure
 
 ```
@@ -141,6 +190,9 @@ arch-viewer/
     scoring.py          # Architecture health scoring
     dep_graph.py        # Dependency graph builder
     agent.py            # AI agent (pydantic-ai)
+    memory.py           # Flat-file + Mem0 + Neo4j memory layer
+    graph_store.py      # Neo4j wrapper (optional)
+    mem_store.py        # Mem0 wrapper (optional)
     models.py           # Pydantic data models
     watcher.py          # File system watcher
     web_server.py       # aiohttp web dashboard

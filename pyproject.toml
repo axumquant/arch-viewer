@@ -40,7 +40,13 @@ dependencies = [
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.37.0"]
-all = ["anthropic>=0.37.0"]
+graph = ["neo4j>=5.20", "mem0ai>=0.1.50", "qdrant-client>=1.9"]
+all = [
+    "anthropic>=0.37.0",
+    "neo4j>=5.20",
+    "mem0ai>=0.1.50",
+    "qdrant-client>=1.9",
+]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24.0", "ruff>=0.8.0"]
 
 [project.urls]

@@ -27,6 +27,49 @@ log = logging.getLogger("arch-viewer.memory")
 MEMORY_FILENAME = "memory.json"
 MEMORY_VERSION = 1
 
+# ─── Lazy graph / semantic store accessors ───
+#
+# Both stores are optional. We cache one instance per project root so we
+# don't reconnect on every call, and we swallow every error so a missing
+# Neo4j / Qdrant never breaks the flat-file memory layer.
+
+_GRAPH_CACHE: dict[str, Any] = {}
+_MEM_CACHE: dict[str, Any] = {}
+
+
+def _get_graph_store(project_root: str | Path):
+    """Return a connected GraphStore for this project, or None."""
+    key = str(Path(project_root).resolve()).lower()
+    if key in _GRAPH_CACHE:
+        return _GRAPH_CACHE[key]
+    try:
+        from .graph_store import GraphStore
+        gs = GraphStore(project_root)
+        gs.connect()
+        _GRAPH_CACHE[key] = gs if gs.available else None
+        return _GRAPH_CACHE[key]
+    except Exception as exc:
+        log.debug("GraphStore init failed: %s", exc)
+        _GRAPH_CACHE[key] = None
+        return None
+
+
+def _get_mem_store(project_root: str | Path):
+    """Return a connected MemStore for this project, or None."""
+    key = str(Path(project_root).resolve()).lower()
+    if key in _MEM_CACHE:
+        return _MEM_CACHE[key]
+    try:
+        from .mem_store import MemStore
+        ms = MemStore(project_root)
+        ms.connect()
+        _MEM_CACHE[key] = ms if ms.available else None
+        return _MEM_CACHE[key]
+    except Exception as exc:
+        log.debug("MemStore init failed: %s", exc)
+        _MEM_CACHE[key] = None
+        return None
+
 # ─── Default memory structure ───
 
 
@@ -133,6 +176,18 @@ def add_pattern(
     memory["patterns"].append(entry)
     save_memory(project_root, memory)
     log.info("Pattern added [%s] (%.0f%%): %s", category, confidence * 100, description[:80])
+
+    # Best-effort: also store in semantic memory
+    ms = _get_mem_store(project_root)
+    if ms is not None:
+        try:
+            ms.add_pattern(
+                description,
+                metadata={"category": category, "confidence": entry["confidence"], "source": source},
+            )
+        except Exception as exc:
+            log.debug("MemStore.add_pattern failed: %s", exc)
+
     return entry
 
 
@@ -161,6 +216,15 @@ def add_correction(
     memory["corrections"].append(entry)
     save_memory(project_root, memory)
     log.info("Correction recorded: '%s' -> '%s'", original[:60], correction[:60])
+
+    # Best-effort: also store in semantic memory
+    ms = _get_mem_store(project_root)
+    if ms is not None:
+        try:
+            ms.add_correction(original, correction)
+        except Exception as exc:
+            log.debug("MemStore.add_correction failed: %s", exc)
+
     return entry
 
 
@@ -284,6 +348,24 @@ def get_context_for_analysis(project_root: str | Path) -> str:
         sections.append(f"\n=== Previous Analysis ===")
         sections.append(f"  Score: {recent['score']}/100, Components: {recent['components']}")
 
+    # Semantic recall via Mem0 (if available) — top-relevant snippets
+    ms = _get_mem_store(project_root)
+    if ms is not None:
+        try:
+            project_name = memory.get("project_name", Path(project_root).name)
+            results = ms.search(
+                f"{project_name} architecture patterns corrections", limit=5
+            )
+            if results:
+                sections.append("\n=== Semantic Memory (most relevant) ===")
+                for r in results:
+                    if isinstance(r, dict):
+                        text = r.get("memory") or r.get("text") or r.get("content") or ""
+                        if text:
+                            sections.append(f"  - {text}")
+        except Exception as exc:
+            log.debug("Mem0 search failed: %s", exc)
+
     if not sections:
         return ""
 
@@ -292,3 +374,39 @@ def get_context_for_analysis(project_root: str | Path) -> str:
         + "\n".join(sections)
         + "\n--- End AI Memory ---\n"
     )
+
+
+# ─── Graph sync ───
+
+
+def sync_architecture_to_graph(arch: Any, project_root: str | Path) -> bool:
+    """
+    Push the current architecture (components, dependencies, data flows)
+    into Neo4j so it can be explored at http://localhost:7474.
+
+    Best-effort: returns False without raising if Neo4j is unavailable.
+    """
+    gs = _get_graph_store(project_root)
+    if gs is None or not getattr(gs, "available", False):
+        return False
+    try:
+        # Wipe the project's previous snapshot so deleted components don't linger.
+        gs.clear_project()
+
+        for comp in getattr(arch, "components", []) or []:
+            gs.upsert_component(comp)
+        for dep in getattr(arch, "dependencies", []) or []:
+            gs.upsert_dependency(dep)
+        for flow in getattr(arch, "data_flows", []) or []:
+            gs.upsert_data_flow(flow)
+
+        log.info(
+            "Synced architecture to Neo4j: %d components, %d deps, %d flows",
+            len(getattr(arch, "components", []) or []),
+            len(getattr(arch, "dependencies", []) or []),
+            len(getattr(arch, "data_flows", []) or []),
+        )
+        return True
+    except Exception as exc:
+        log.warning("sync_architecture_to_graph failed: %s", exc)
+        return False

@@ -390,6 +390,28 @@ class ArchitectureAgent:
             arch.ai_summary = "(AI analysis unavailable — check API key in .arch-viewer.keys.json)"
 
         arch.analysis_version += 1
+
+        # Post-analysis hooks: persist a summary to memory and push the
+        # graph to Neo4j. Both are best-effort and must not block analysis.
+        try:
+            from .memory import record_analysis, sync_architecture_to_graph
+            try:
+                summary_text = (arch.description or "")[:300]
+                record_analysis(
+                    root,
+                    score=0,  # caller can overwrite with the real score later
+                    component_count=len(arch.components),
+                    summary=summary_text,
+                )
+            except Exception as exc:
+                log.debug("record_analysis failed: %s", exc)
+            try:
+                sync_architecture_to_graph(arch, root)
+            except Exception as exc:
+                log.debug("sync_architecture_to_graph failed: %s", exc)
+        except Exception as exc:
+            log.debug("memory hooks unavailable: %s", exc)
+
         return arch
 
     async def _analyze_component(

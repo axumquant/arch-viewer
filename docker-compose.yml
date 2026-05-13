@@ -1,0 +1,74 @@
+services:
+  neo4j:
+    image: neo4j:5-community
+    container_name: arch-viewer-neo4j
+    restart: unless-stopped
+    ports:
+      - "7474:7474"   # HTTP browser UI
+      - "7687:7687"   # Bolt protocol
+    environment:
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:-archviewer123}"
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
+      NEO4J_server_memory_heap_initial__size: "512m"
+      NEO4J_server_memory_heap_max__size: "1G"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+      - neo4j_plugins:/plugins
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: arch-viewer-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"   # REST API
+      - "6334:6334"   # gRPC API
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  arch-viewer:
+    # Optional: build & run the Python app inside the same compose stack.
+    # Comment this service out if you'd rather run arch-viewer directly on the host.
+    image: python:3.12-slim
+    container_name: arch-viewer-app
+    profiles: ["app"]   # only starts when `--profile app` is passed
+    working_dir: /workspace
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    environment:
+      NEO4J_URI: "bolt://neo4j:7687"
+      NEO4J_USER: "neo4j"
+      NEO4J_PASSWORD: "${NEO4J_PASSWORD:-archviewer123}"
+      QDRANT_URL: "http://qdrant:6333"
+      MEM0_ENABLED: "1"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+    volumes:
+      - .:/workspace
+    command: >
+      bash -c "pip install -e '.[graph]' && python -m arch_viewer --web"
+    ports:
+      - "3777:3777"
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_import:
+  neo4j_plugins:
+  qdrant_data:

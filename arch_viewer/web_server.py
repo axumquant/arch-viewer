@@ -351,6 +351,50 @@ async def start_web_server(arch_mcp, port: int = 3777):
             },
         })
 
+    async def handle_api_diagram_generate(request):
+        """Generate a standalone interactive architecture HTML file."""
+        from .diagram_generator import generate_interactive_html
+
+        arch = arch_mcp.get_architecture()
+        if not arch:
+            return web.json_response({"error": "Not scanned yet"}, status=503)
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        rel_or_abs = body.get("output_path") or "docs/architecture.html"
+
+        out_path = Path(rel_or_abs)
+        if not out_path.is_absolute():
+            out_path = root / out_path
+        out_path = out_path.resolve()
+        if not str(out_path).startswith(str(root)):
+            return web.json_response({"error": "output_path must be inside project root"}, status=400)
+
+        project_name = arch.project_name or root.name
+        html = generate_interactive_html(arch, project_name)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(html, encoding="utf-8")
+
+        # Build a URL the dashboard can link to (served via /static if under /web,
+        # otherwise via the file API as a download)
+        try:
+            rel_to_root = out_path.relative_to(root).as_posix()
+        except ValueError:
+            rel_to_root = out_path.name
+        url = f"/api/file?path={rel_to_root}"
+
+        return web.json_response({
+            "ok": True,
+            "path": str(out_path),
+            "url": url,
+            "size": out_path.stat().st_size,
+            "components": len(arch.components),
+            "data_flows": len(arch.data_flows),
+            "project_name": project_name,
+        })
+
     # ─── App Setup ───
 
     app = web.Application()
@@ -373,6 +417,7 @@ async def start_web_server(arch_mcp, port: int = 3777):
     app.router.add_get("/api/score", handle_api_score)
     app.router.add_get("/api/dep-graph", handle_api_dep_graph)
     app.router.add_get("/api/anti-patterns", handle_api_anti_patterns)
+    app.router.add_post("/api/diagram/generate", handle_api_diagram_generate)
 
     runner = web.AppRunner(app)
     await runner.setup()

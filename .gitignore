@@ -40,5 +40,12 @@ coverage/
 .mypy_cache/
 .ruff_cache/
 
+# Generated diagrams (output of diagram_generator.py)
+docs/test-diagram.html
+docs/architecture.html
+
+# Local Docker volumes
+volumes/
+
 # Lock files (keep package-lock.json for reproducible Node installs)
 # package-lock.json

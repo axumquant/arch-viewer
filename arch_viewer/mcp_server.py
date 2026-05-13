@@ -290,6 +290,28 @@ class ArchViewerMCP:
                     },
                 ),
                 Tool(
+                    name="generate_interactive_diagram",
+                    description=(
+                        "Generate a standalone interactive HTML architecture diagram file "
+                        "for the current project. The output is a single self-contained HTML "
+                        "with pannable/zoomable nodes, animated flow edges, and a detail panel. "
+                        "Open it in any browser — no server required."
+                    ),
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "output_path": {
+                                "type": "string",
+                                "description": (
+                                    "Where to write the HTML file (absolute or relative to "
+                                    "the project root). Default: docs/architecture.html"
+                                ),
+                            },
+                        },
+                        "required": [],
+                    },
+                ),
+                Tool(
                     name="add_memory_correction",
                     description=(
                         "Correct something the AI got wrong. The correction is stored and "
@@ -503,6 +525,31 @@ class ArchViewerMCP:
                 "message": f"Pattern added [{category}]",
                 "pattern": entry,
             }, indent=2, default=str)
+
+        elif name == "generate_interactive_diagram":
+            from .diagram_generator import generate_interactive_html
+            rel_or_abs = args.get("output_path", "docs/architecture.html")
+            out_path = Path(rel_or_abs)
+            if not out_path.is_absolute():
+                out_path = self.root / out_path
+            out_path = out_path.resolve()
+            # Confine writes to the project root for safety
+            if not str(out_path).startswith(str(self.root)):
+                return f"Error: output_path must be inside the project root ({self.root})"
+
+            project_name = self._arch.project_name or self.root.name
+            html = generate_interactive_html(self._arch, project_name)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(html, encoding="utf-8")
+
+            return json.dumps({
+                "status": "ok",
+                "path": str(out_path),
+                "size": out_path.stat().st_size,
+                "components": len(self._arch.components),
+                "data_flows": len(self._arch.data_flows),
+                "project_name": project_name,
+            }, indent=2)
 
         elif name == "add_memory_correction":
             original = args.get("original", "")
