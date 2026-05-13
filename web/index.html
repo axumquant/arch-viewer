@@ -72,6 +72,18 @@
   .pane { width: 100%; height: 100%; overflow: auto; display: none; }
   .pane.active { display: block; }
 
+  /* Interactive Diagram */
+  #diagramView { position: relative; }
+  #diagramView.active { display: flex; flex-direction: column; }
+  .diag-toolbar { padding: 6px 14px; background: var(--bg2); border-bottom: 1px solid var(--bg4); display: flex; gap: 10px; align-items: center; font-size: 11px; flex-shrink: 0; }
+  .diag-toolbar select { background: var(--bg3); border: 1px solid var(--bg4); color: var(--fg); padding: 3px 8px; border-radius: 4px; font-size: 11px; }
+  .diag-toolbar .hint { color: var(--fg3); margin-left: auto; font-size: 10px; }
+  #diagramCanvas { flex: 1; background: var(--bg); }
+  .diag-legend { position: absolute; bottom: 12px; left: 12px; background: rgba(13,17,23,0.92); border: 1px solid var(--bg4); border-radius: 8px; padding: 10px 14px; font-size: 10px; z-index: 10; }
+  .diag-legend h4 { font-size: 11px; color: var(--fg2); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .diag-legend .leg-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; color: var(--fg2); }
+  .diag-legend .leg-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+
   /* Architecture view */
   #archView { padding: 24px; }
   .section-title { font-size: 15px; font-weight: 600; color: var(--fg); margin: 24px 0 12px; }
@@ -240,11 +252,27 @@
     <div class="tabs" id="tabBar"></div>
     <div class="view-bar">
       <button class="vb active" data-v="arch">Architecture</button>
+      <button class="vb" data-v="diagram">Diagram</button>
       <button class="vb" data-v="editor">Editor</button>
       <button class="vb" data-v="activity">Activity</button>
     </div>
     <div class="content">
       <div class="pane active" id="archView"></div>
+      <div class="pane" id="diagramView">
+        <div class="diag-toolbar">
+          <span style="color:var(--fg)">Interactive Architecture</span>
+          <select id="diagramLayout">
+            <option value="force">Force Layout</option>
+            <option value="hierarchical">Hierarchical</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:4px;color:var(--fg2);cursor:pointer">
+            <input type="checkbox" id="diagramFlows" checked style="accent-color:var(--accent)"/> Data Flows
+          </label>
+          <span class="hint">Scroll to zoom · Drag to pan · Click nodes for details</span>
+        </div>
+        <div id="diagramCanvas"></div>
+        <div class="diag-legend" id="diagramLegend"></div>
+      </div>
       <div class="pane" id="editorView"></div>
       <div class="pane" id="activityView"><div class="act-empty">Watching for file changes...</div></div>
     </div>
@@ -628,9 +656,265 @@ function renderActivity() {
 function renderVB() {
   document.querySelectorAll(".vb").forEach(b => b.classList.toggle("active", b.dataset.v===S.view));
   document.getElementById("archView").classList.toggle("active", S.view==="arch");
+  document.getElementById("diagramView").classList.toggle("active", S.view==="diagram");
   document.getElementById("editorView").classList.toggle("active", S.view==="editor");
   document.getElementById("activityView").classList.toggle("active", S.view==="activity");
+  if (S.view==="diagram") renderDiagram();
 }
+
+// ─── Interactive Architecture Diagram (Cytoscape.js CDN) ───
+let cyInstance = null;
+let cyLoaded = false;
+(() => {
+  const s = document.createElement("script");
+  s.src = "https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.4/cytoscape.min.js";
+  s.onload = () => { cyLoaded = true; console.log("✓ Cytoscape.js loaded"); if (S.view==="diagram") renderDiagram(); };
+  s.onerror = () => console.warn("Cytoscape.js load failed");
+  document.head.appendChild(s);
+})();
+
+const ZONE_COLORS = {
+  backend:"#3fb950", frontend:"#58a6ff", extension:"#f778ba", database:"#a371f7",
+  docker:"#2ea9df", ci_cd:"#d18616", config:"#d29922", cache:"#79c0ff",
+  auth:"#d29922", worker:"#bc8cff", mcp_server:"#58a6ff", other:"#8b949e",
+};
+const ZONE_LABELS = {
+  backend:"Backend", frontend:"Frontend", extension:"Extension", database:"Database",
+  docker:"Docker", ci_cd:"CI/CD", config:"Config", cache:"Cache",
+  auth:"Auth", worker:"Worker", mcp_server:"MCP Server", other:"Other",
+};
+
+function renderDiagram() {
+  const canvas = document.getElementById("diagramCanvas");
+  if (!S.arch || !cyLoaded) {
+    if (!cyLoaded) canvas.innerHTML = '<div style="padding:40px;text-align:center;color:var(--fg3)">Loading diagram engine...</div>';
+    else canvas.innerHTML = '<div style="padding:40px;text-align:center;color:var(--fg3)">Scanning project...</div>';
+    return;
+  }
+
+  const comps = S.arch.components || [];
+  const flows = S.arch.data_flows || [];
+  const showFlows = document.getElementById("diagramFlows")?.checked ?? true;
+  const layoutType = document.getElementById("diagramLayout")?.value || "force";
+
+  if (comps.length === 0) {
+    canvas.innerHTML = '<div style="padding:40px;text-align:center;color:var(--fg3)">No components detected yet. Click ↻ Refresh to run AI analysis.</div>';
+    return;
+  }
+
+  // Destroy previous instance
+  if (cyInstance) { cyInstance.destroy(); cyInstance = null; }
+  canvas.innerHTML = "";
+
+  // Build elements
+  const elements = [];
+
+  // Nodes from components
+  comps.forEach(comp => {
+    const color = ZONE_COLORS[comp.type] || ZONE_COLORS.other;
+    const tech = (comp.tech_stack || []).slice(0, 2).join(", ");
+    const fileCount = (comp.files || []).length;
+    const routes = (comp.api_routes || []).length;
+    elements.push({
+      group: "nodes",
+      data: {
+        id: comp.name,
+        label: comp.name,
+        type: comp.type || "other",
+        color: color,
+        desc: comp.description || "",
+        tech: tech,
+        fileCount: fileCount,
+        routes: routes,
+        path: comp.path || "",
+      },
+    });
+  });
+
+  // Edges from data flows
+  if (showFlows) {
+    flows.forEach((flow, i) => {
+      const src = comps.find(c => c.name === flow.source);
+      const tgt = comps.find(c => c.name === flow.target);
+      if (!src || !tgt) return;
+      elements.push({
+        group: "edges",
+        data: {
+          id: "e" + i,
+          source: flow.source,
+          target: flow.target,
+          protocol: flow.protocol || "",
+          desc: flow.description || "",
+          isWs: flow.protocol === "WebSocket" || flow.protocol === "ws",
+        },
+      });
+    });
+  }
+
+  // Also add dependency edges (dotted) if no data flows exist for a pair
+  const flowPairs = new Set(flows.map(f => f.source + "→" + f.target));
+  const deps = S.arch.dependencies || [];
+  deps.forEach((dep, i) => {
+    const key = dep.from + "→" + dep.to;
+    if (flowPairs.has(key)) return;
+    const src = comps.find(c => c.name === dep.from);
+    const tgt = comps.find(c => c.name === dep.to);
+    if (!src || !tgt) return;
+    elements.push({
+      group: "edges",
+      data: { id: "d" + i, source: dep.from, target: dep.to, protocol: "dep", desc: dep.type || "dependency", isWs: false },
+    });
+  });
+
+  // Layout config
+  const layoutCfg = layoutType === "hierarchical"
+    ? { name: "breadthfirst", directed: true, spacingFactor: 1.5, padding: 40 }
+    : { name: "cose", animate: false, padding: 40, nodeRepulsion: () => 8000, idealEdgeLength: () => 160, edgeElasticity: () => 80, gravity: 0.3, numIter: 300 };
+
+  cyInstance = cytoscape({
+    container: canvas,
+    elements: elements,
+    minZoom: 0.3,
+    maxZoom: 3,
+    wheelSensitivity: 0.3,
+    style: [
+      {
+        selector: "node",
+        style: {
+          "shape": "roundrectangle",
+          "width": 140,
+          "height": 50,
+          "background-color": "data(color)",
+          "background-opacity": 0.15,
+          "border-width": 2,
+          "border-color": "data(color)",
+          "border-opacity": 1,
+          "label": "data(label)",
+          "color": "#c9d1d9",
+          "text-valign": "center",
+          "text-halign": "center",
+          "font-size": "12px",
+          "font-family": "-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif",
+          "text-wrap": "wrap",
+          "text-max-width": "120px",
+          "text-outline-width": 0,
+          "overlay-padding": "6px",
+        },
+      },
+      {
+        selector: "node:active, node:selected",
+        style: {
+          "background-opacity": 0.35,
+          "border-width": 3,
+          "overlay-color": "#58a6ff",
+          "overlay-opacity": 0.1,
+        },
+      },
+      {
+        selector: "node:hover",
+        style: { "background-opacity": 0.25 },
+      },
+      {
+        selector: "edge",
+        style: {
+          "width": 1.8,
+          "line-color": "#484f58",
+          "target-arrow-color": "#58a6ff",
+          "target-arrow-shape": "triangle",
+          "arrow-scale": 0.8,
+          "curve-style": "bezier",
+          "label": "data(protocol)",
+          "font-size": "9px",
+          "color": "#8b949e",
+          "text-rotation": "autorotate",
+          "text-margin-y": -8,
+          "text-background-color": "#0d1117",
+          "text-background-opacity": 0.8,
+          "text-background-padding": "2px",
+          "font-family": "-apple-system, sans-serif",
+        },
+      },
+      {
+        selector: "edge[?isWs]",
+        style: { "line-style": "dashed", "line-dash-pattern": [6, 3] },
+      },
+      {
+        selector: 'edge[protocol = "dep"]',
+        style: { "line-style": "dotted", "line-color": "#30363d", "target-arrow-color": "#484f58", "width": 1, "label": "" },
+      },
+      {
+        selector: "edge:active, edge:selected",
+        style: { "line-color": "#58a6ff", "width": 2.5 },
+      },
+    ],
+    layout: layoutCfg,
+  });
+
+  // Click: filter tree to component path
+  cyInstance.on("tap", "node", evt => {
+    const path = evt.target.data("path");
+    if (path) {
+      document.getElementById("treeFilter").value = path;
+      renderTree();
+    }
+  });
+
+  // Tooltip on hover
+  const tip = document.createElement("div");
+  tip.className = "cy-tooltip";
+  tip.style.cssText = "display:none;position:absolute;z-index:20;background:rgba(22,27,34,0.95);border:1px solid var(--bg4);border-radius:6px;padding:8px 12px;font-size:11px;color:var(--fg);pointer-events:none;max-width:260px;line-height:1.5;box-shadow:0 4px 12px rgba(0,0,0,0.4);";
+  canvas.appendChild(tip);
+
+  cyInstance.on("mouseover", "node", evt => {
+    const d = evt.target.data();
+    const icon = COMP_ICONS[d.type] || "📁";
+    let html = `<div style="font-weight:600;margin-bottom:4px">${icon} ${d.label}</div>`;
+    if (d.desc) html += `<div style="color:var(--fg2);margin-bottom:2px">${d.desc}</div>`;
+    if (d.tech) html += `<div style="color:var(--accent);font-size:10px">${d.tech}</div>`;
+    html += `<div style="color:var(--fg3);font-size:10px;margin-top:2px">${d.fileCount} files${d.routes ? " · " + d.routes + " routes" : ""}</div>`;
+    tip.innerHTML = html;
+    tip.style.display = "block";
+    const pos = evt.renderedPosition || evt.target.renderedPosition();
+    tip.style.left = (pos.x + 16) + "px";
+    tip.style.top = (pos.y - 10) + "px";
+  });
+  cyInstance.on("mouseout", "node", () => { tip.style.display = "none"; });
+  cyInstance.on("mouseover", "edge", evt => {
+    const d = evt.target.data();
+    if (!d.desc && !d.protocol) return;
+    tip.innerHTML = `<div style="font-weight:600">${d.source} → ${d.target}</div>${d.protocol ? '<div style="color:var(--accent);font-size:10px">' + d.protocol + '</div>' : ''}${d.desc ? '<div style="color:var(--fg2)">' + d.desc + '</div>' : ''}`;
+    tip.style.display = "block";
+    const pos = evt.renderedPosition || evt.target.renderedMidpoint();
+    tip.style.left = (pos.x + 12) + "px";
+    tip.style.top = (pos.y - 8) + "px";
+  });
+  cyInstance.on("mouseout", "edge", () => { tip.style.display = "none"; });
+
+  // Fit after layout
+  cyInstance.ready(() => { cyInstance.fit(undefined, 40); if (cyInstance.zoom() > 1.5) cyInstance.zoom({ level: 1, renderedPosition: { x: canvas.offsetWidth/2, y: canvas.offsetHeight/2 } }); });
+
+  // Render legend
+  const types = [...new Set(comps.map(c => c.type || "other"))];
+  let legHtml = '<h4>Component Types</h4>';
+  for (const t of types) {
+    const c = ZONE_COLORS[t] || ZONE_COLORS.other;
+    legHtml += `<div class="leg-row"><div class="leg-dot" style="background:${c}"></div>${ZONE_LABELS[t] || t}</div>`;
+  }
+  if (showFlows && flows.length > 0) {
+    legHtml += '<h4 style="margin-top:8px">Data Flows</h4>';
+    const protocols = [...new Set(flows.map(f => f.protocol || "unknown"))];
+    for (const p of protocols) {
+      const dash = p === "WebSocket" || p === "ws" ? "dashed" : "solid";
+      legHtml += `<div class="leg-row"><div style="width:20px;border-top:2px ${dash} #8b949e;margin-right:2px"></div>${p}</div>`;
+    }
+  }
+  legHtml += `<div style="margin-top:8px;color:var(--fg3);font-size:9px">Click node to filter files<br>Scroll to zoom · Drag to pan</div>`;
+  document.getElementById("diagramLegend").innerHTML = legHtml;
+}
+
+// Wire up diagram controls
+document.getElementById("diagramLayout")?.addEventListener("change", () => { if (S.view==="diagram") renderDiagram(); });
+document.getElementById("diagramFlows")?.addEventListener("change", () => { if (S.view==="diagram") renderDiagram(); });
 
 // ─── Actions ───
 function openFile(p) { reqFile(p); }
@@ -651,7 +935,7 @@ function mdToHtml(md) {
 }
 
 // ─── Events ───
-document.querySelectorAll(".vb").forEach(b => b.onclick = () => { S.view=b.dataset.v; renderVB(); if(S.view==="editor")renderEditor(); });
+document.querySelectorAll(".vb").forEach(b => b.onclick = () => { S.view=b.dataset.v; renderVB(); if(S.view==="editor")renderEditor(); if(S.view==="diagram")renderDiagram(); });
 document.getElementById("treeFilter").addEventListener("input", renderTree);
 document.getElementById("showHiddenToggle").addEventListener("change", renderTree);
 document.getElementById("refreshBtn").onclick = () => { S.ws?.send(JSON.stringify({type:"refresh_ai"})); document.getElementById("refreshBtn").textContent="↻ Analyzing..."; setTimeout(()=>document.getElementById("refreshBtn").textContent="↻ Refresh", 30000); };
@@ -740,8 +1024,8 @@ document.getElementById("settingsBtn").onclick = async () => {
   await loadKeyStatus();
   settingsModal.classList.add("show");
 };
-document.getElementById("cancelKeysBtn").onclick = () => settingsModal.classList.remove("show");
-settingsModal.onclick = (e) => { if (e.target === settingsModal) settingsModal.classList.remove("show"); };
+document.getElementById("cancelKeysBtn").onclick = () => { settingsModal.classList.remove("show"); sessionStorage.setItem("av-settings-checked","1"); };
+settingsModal.onclick = (e) => { if (e.target === settingsModal) { settingsModal.classList.remove("show"); sessionStorage.setItem("av-settings-checked","1"); } };
 
 document.getElementById("saveKeysBtn").onclick = async () => {
   const keys = {};
@@ -776,8 +1060,10 @@ document.getElementById("saveKeysBtn").onclick = async () => {
   document.getElementById("saveKeysBtn").textContent = "Save & Analyze";
 };
 
-// Auto-show settings on first load if no AI keys
+// Auto-show settings ONLY on very first load per session if no keys at all
 async function checkFirstRun() {
+  if (sessionStorage.getItem("av-settings-checked")) return;
+  sessionStorage.setItem("av-settings-checked", "1");
   try {
     const r = await (await fetch("/api/keys")).json();
     const anyConfigured = Object.values(r.providers || {}).some(p => p.configured);
