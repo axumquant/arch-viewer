@@ -51,6 +51,8 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.24.0", "ruff>=0.8.0"]
 Homepage = "https://github.com/axumquant/arch-viewer"
 Repository = "https://github.com/axumquant/arch-viewer"
 Issues = "https://github.com/axumquant/arch-viewer/issues"
+Documentation = "https://github.com/axumquant/arch-viewer#readme"
+Changelog = "https://github.com/axumquant/arch-viewer/blob/main/CHANGELOG.md"
 
 [project.scripts]
 arch-viewer = "arch_viewer.__main__:main"

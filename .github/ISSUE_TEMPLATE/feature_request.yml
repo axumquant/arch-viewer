@@ -1,0 +1,55 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea to make arch-viewer better? We'd love to hear it!
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: What problem does this solve, or what workflow would it improve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the feature you'd like to see.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Have you considered any alternative approaches?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Dashboard / UI
+        - MCP tools
+        - Architecture analysis
+        - Diagram generation
+        - Neo4j / graph store
+        - Mem0 / semantic memory
+        - Docker / infrastructure
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I'm willing to submit a PR for this feature

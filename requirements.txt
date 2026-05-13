@@ -1,0 +1,20 @@
+# For most users, prefer `pip install -e .` which uses pyproject.toml.
+# This file is kept in sync as a convenience for pip-tools / requirements-based workflows.
+#
+# Optional extras:
+#   pip install -r requirements.txt anthropic>=0.37.0   # Anthropic provider
+#   pip install -r requirements.txt pytest>=8.0 pytest-asyncio>=0.24.0 ruff>=0.8.0  # dev
+
+mcp>=1.0.0
+pydantic>=2.9.0
+pydantic-ai>=0.0.30
+watchdog>=4.0.0
+aiohttp>=3.10.0
+aiofiles>=24.1.0
+pyyaml>=6.0.0
+rich>=13.9.0
+openai>=1.50.0
+# Graph + memory stack — required, no fallback
+neo4j>=5.20
+mem0ai>=0.1.50
+qdrant-client>=1.9

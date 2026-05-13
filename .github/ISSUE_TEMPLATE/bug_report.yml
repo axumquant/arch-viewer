@@ -1,0 +1,84 @@
+name: Bug Report
+description: Report a bug in arch-viewer
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the form below.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what went wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce the issue?
+      placeholder: |
+        1. Run `arch-viewer --scan /path/to/project`
+        2. Open http://localhost:3777
+        3. Click on "..."
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / error output
+      description: Paste any relevant logs or terminal output.
+      render: shell
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Windows 10/11
+        - macOS (Intel)
+        - macOS (Apple Silicon)
+        - Linux (Ubuntu/Debian)
+        - Linux (Other)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      placeholder: "3.12.4"
+    validations:
+      required: true
+
+  - type: input
+    id: arch-viewer-version
+    attributes:
+      label: arch-viewer version
+      placeholder: "2.0.0"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: docker
+    attributes:
+      label: Docker services
+      options:
+        - label: Neo4j is running
+        - label: Qdrant is running
+        - label: Docker Desktop is installed
