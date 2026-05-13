@@ -41,8 +41,7 @@ coverage/
 .ruff_cache/
 
 # Generated diagrams (output of diagram_generator.py)
-docs/test-diagram.html
-docs/architecture.html
+docs/*.html
 
 # Local Docker volumes
 volumes/

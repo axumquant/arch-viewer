@@ -6,6 +6,10 @@ the Sales Coach reference diagram: pannable/zoomable world, color-tier node
 cards with CSS glow, animated cubic-bezier SVG flow edges, layer column labels,
 slide-in detail panel, legend, and topbar controls.
 
+Each Component is expanded into multiple sub-nodes (one per route-file, entry
+point, or well-known entry file) so a single project produces a rich
+multi-column / multi-row diagram instead of a flat 1-node-per-column view.
+
 Public API:
     generate_interactive_html(arch, project_name) -> str
 """
@@ -13,10 +17,12 @@ Public API:
 from __future__ import annotations
 
 import json
+import os
+from collections import OrderedDict
 from html import escape
 from typing import Iterable
 
-from .models import Architecture, Component, ComponentType, DataFlow
+from .models import Architecture, APIRoute, Component, ComponentType, DataFlow
 
 
 # ─── Layout ──────────────────────────────────────────────────────────────────
@@ -24,8 +30,8 @@ from .models import Architecture, Component, ComponentType, DataFlow
 # Column order — one column per component type. Types not in this list fall
 # through to the trailing "other" column.
 COLUMN_ORDER: list[ComponentType] = [
-    ComponentType.FRONTEND,
     ComponentType.EXTENSION,
+    ComponentType.FRONTEND,
     ComponentType.API_GATEWAY,
     ComponentType.BACKEND,
     ComponentType.MCP_SERVER,
@@ -45,7 +51,7 @@ COLUMN_LABELS: dict[ComponentType, str] = {
     ComponentType.FRONTEND: "Frontend",
     ComponentType.EXTENSION: "Extension",
     ComponentType.API_GATEWAY: "API Gateway",
-    ComponentType.BACKEND: "Backend",
+    ComponentType.BACKEND: "Backend API",
     ComponentType.MCP_SERVER: "MCP Servers",
     ComponentType.WORKER: "Workers",
     ComponentType.QUEUE: "Queues",
@@ -59,32 +65,61 @@ COLUMN_LABELS: dict[ComponentType, str] = {
     ComponentType.OTHER: "Other",
 }
 
-# Type -> tier class (drives CSS border/glow color)
+# Type -> tier class (drives CSS border/glow color). Aligned with the
+# Sales Coach palette: ext=cyan, api=indigo, infra=purple, postcall=yellow,
+# critical=red, high=orange, normal=blue, low=gray.
 TIER_BY_TYPE: dict[ComponentType, str] = {
-    ComponentType.FRONTEND: "frontend",
-    ComponentType.EXTENSION: "extension",
-    ComponentType.API_GATEWAY: "gateway",
-    ComponentType.BACKEND: "backend",
-    ComponentType.MCP_SERVER: "mcp",
-    ComponentType.WORKER: "worker",
-    ComponentType.QUEUE: "queue",
-    ComponentType.AUTH: "auth",
-    ComponentType.CACHE: "cache",
-    ComponentType.STORAGE: "storage",
-    ComponentType.DATABASE: "database",
-    ComponentType.DOCKER: "docker",
-    ComponentType.CI_CD: "cicd",
-    ComponentType.CONFIG: "config",
-    ComponentType.OTHER: "other",
+    ComponentType.FRONTEND: "normal",       # blue
+    ComponentType.EXTENSION: "ext",         # cyan
+    ComponentType.API_GATEWAY: "high",      # orange
+    ComponentType.BACKEND: "api",           # indigo
+    ComponentType.MCP_SERVER: "api",        # indigo
+    ComponentType.WORKER: "postcall",       # yellow
+    ComponentType.QUEUE: "critical",        # red
+    ComponentType.AUTH: "postcall",         # yellow
+    ComponentType.CACHE: "high",            # orange
+    ComponentType.STORAGE: "infra",         # purple
+    ComponentType.DATABASE: "infra",        # purple
+    ComponentType.DOCKER: "infra",          # purple
+    ComponentType.CI_CD: "low",             # gray
+    ComponentType.CONFIG: "low",            # gray
+    ComponentType.OTHER: "low",             # gray
 }
 
 # Layout constants (CSS px in the "world" coordinate space)
-COL_WIDTH = 230
+COL_WIDTH = 260
 COL_X_START = 60
 NODE_X_OFFSET = 30          # node x within column
 NODE_Y_START = 120
 NODE_Y_STEP = 100
+NODE_Y_STEP_TIGHT = 80      # used when a column has many sub-nodes
+TIGHT_PACK_THRESHOLD = 6    # >= this many sub-nodes -> use tight pack
 LAYER_LABEL_Y = 60
+MAX_SUBNODES_PER_COMPONENT = 14
+
+# Well-known entry-file basenames (per language/stack) used as a last-resort
+# source of sub-nodes when a component has no routes / entry_points.
+WELL_KNOWN_ENTRY_FILES = {
+    # JavaScript / TypeScript / Chrome extension
+    "manifest.json", "background.js", "background.ts",
+    "content.js", "content.ts", "content-script.js",
+    "offscreen.js", "offscreen.html",
+    "sidepanel.js", "sidepanel.html", "panel.js",
+    "popup.js", "popup.html", "options.js", "options.html",
+    "service-worker.js", "sw.js",
+    "index.js", "index.ts", "index.tsx", "index.jsx",
+    "main.js", "main.ts", "main.tsx", "main.jsx",
+    "app.js", "app.ts", "app.tsx", "app.jsx",
+    "server.js", "server.ts",
+    # Python
+    "main.py", "app.py", "server.py", "asgi.py", "wsgi.py",
+    "__main__.py", "manage.py",
+    # Go / Rust / Java
+    "main.go", "main.rs", "Main.java",
+    # Docker / Infra
+    "Dockerfile", "docker-compose.yml", "docker-compose.yaml",
+    "Makefile",
+}
 
 
 def _safe_id(name: str) -> str:
@@ -114,9 +149,122 @@ def _protocol_class(protocol: str) -> str:
     return "default"
 
 
-def _layout(arch: Architecture) -> tuple[dict, list[dict], list[dict]]:
+# ─── Sub-node expansion ──────────────────────────────────────────────────────
+
+def _basename(path: str) -> str:
+    """File basename of a route's source file (cross-platform)."""
+    if not path:
+        return ""
+    return os.path.basename(path.replace("\\", "/"))
+
+
+def _expand_component(comp: Component) -> list[dict]:
     """
-    Position components into columns. Returns (nodes_by_name, nodes_list, layer_labels).
+    Turn one Component into a list of sub-node *blueprints* (no x/y yet).
+
+    Strategy (first non-empty wins):
+      1. api_routes  -> group by file, one sub-node per route-file
+      2. entry_points -> one sub-node per entry
+      3. well-known entry files in `files`
+      4. fallback   -> single sub-node for the whole component
+
+    Each blueprint dict carries:
+        label, sub, path, kind ("route_file"|"entry"|"file"|"component"),
+        routes (list of APIRoute mini-dicts, may be empty),
+        component_name, component_description
+    """
+    blueprints: list[dict] = []
+
+    # --- 1. routes grouped by file ----------------------------------------
+    if comp.api_routes:
+        # Use OrderedDict so insertion order is preserved deterministically.
+        by_file: "OrderedDict[str, list[APIRoute]]" = OrderedDict()
+        for r in comp.api_routes:
+            key = r.file or "(unknown)"
+            by_file.setdefault(key, []).append(r)
+        for fpath, routes in list(by_file.items())[:MAX_SUBNODES_PER_COMPONENT]:
+            base = _basename(fpath) or fpath
+            blueprints.append({
+                "label": base,
+                "sub": f"{len(routes)} route" + ("s" if len(routes) != 1 else ""),
+                "path": fpath,
+                "kind": "route_file",
+                "routes": [
+                    {"method": r.method, "path": r.path, "file": r.file}
+                    for r in routes[:30]
+                ],
+                "component_name": comp.name,
+                "component_description": comp.description or "",
+            })
+        return blueprints
+
+    # --- 2. entry points --------------------------------------------------
+    if comp.entry_points:
+        for ep in comp.entry_points[:MAX_SUBNODES_PER_COMPONENT]:
+            base = _basename(ep) or ep
+            # Build a friendly sub-label from the directory above the file
+            parent = os.path.dirname(ep.replace("\\", "/"))
+            parent = parent.split("/")[-1] if parent else ""
+            blueprints.append({
+                "label": base,
+                "sub": parent or "Entry point",
+                "path": ep,
+                "kind": "entry",
+                "routes": [],
+                "component_name": comp.name,
+                "component_description": comp.description or "",
+            })
+        return blueprints
+
+    # --- 3. well-known entry files within files[] -------------------------
+    if comp.files:
+        picks: list[str] = []
+        for f in comp.files:
+            base = _basename(f)
+            if base in WELL_KNOWN_ENTRY_FILES:
+                picks.append(f)
+            if len(picks) >= MAX_SUBNODES_PER_COMPONENT:
+                break
+        if picks:
+            for fpath in picks:
+                base = _basename(fpath) or fpath
+                parent = os.path.dirname(fpath.replace("\\", "/"))
+                parent = parent.split("/")[-1] if parent else ""
+                blueprints.append({
+                    "label": base,
+                    "sub": parent or "File",
+                    "path": fpath,
+                    "kind": "file",
+                    "routes": [],
+                    "component_name": comp.name,
+                    "component_description": comp.description or "",
+                })
+            return blueprints
+
+    # --- 4. fallback: one node ------------------------------------------
+    blueprints.append({
+        "label": comp.name,
+        "sub": COLUMN_LABELS.get(comp.type, comp.type.value),
+        "path": comp.path or "",
+        "kind": "component",
+        "routes": [],
+        "component_name": comp.name,
+        "component_description": comp.description or "",
+    })
+    return blueprints
+
+
+def _layout(arch: Architecture) -> tuple[dict, list[dict], list[dict], dict]:
+    """
+    Position components into columns, expanding each into sub-nodes.
+
+    Returns:
+        nodes_by_component_name: {component_name -> primary sub-node dict}
+            (used so DataFlow edges referencing the component land on its
+            primary sub-node)
+        nodes_list: all node dicts in render order
+        layer_labels: column labels at the top
+        nodes_by_id: {node_id -> node dict}
     """
     # Group components by type, preserving original order within each group
     by_type: dict[ComponentType, list[Component]] = {t: [] for t in COLUMN_ORDER}
@@ -125,7 +273,8 @@ def _layout(arch: Architecture) -> tuple[dict, list[dict], list[dict]]:
         by_type[ct].append(c)
 
     nodes_list: list[dict] = []
-    nodes_by_name: dict[str, dict] = {}
+    nodes_by_component_name: dict[str, dict] = {}
+    nodes_by_id: dict[str, dict] = {}
     layer_labels: list[dict] = []
 
     col_index = 0
@@ -133,51 +282,77 @@ def _layout(arch: Architecture) -> tuple[dict, list[dict], list[dict]]:
         comps = by_type.get(ctype, [])
         if not comps:
             continue
+
         x = COL_X_START + col_index * COL_WIDTH
+        col_y = NODE_Y_START
+
+        # Layer label: column heading. If the column has a single component
+        # whose name differs from the generic label, prefer the component name
+        # so e.g. "Backend API" or "Extension" shows the actual component
+        # name like the Sales Coach reference.
+        label_text = COLUMN_LABELS[ctype]
+        if len(comps) == 1 and comps[0].name and comps[0].name.lower() != label_text.lower():
+            label_text = f"{comps[0].name} ({label_text})" if label_text not in comps[0].name else comps[0].name
         layer_labels.append({
-            "text": COLUMN_LABELS[ctype],
-            "x": x,
+            "text": label_text,
+            "x": x + NODE_X_OFFSET,
             "y": LAYER_LABEL_Y,
         })
-        for i, comp in enumerate(comps):
-            y = NODE_Y_START + i * NODE_Y_STEP
-            node = {
-                "id": _safe_id(comp.name),
-                "name": comp.name,
-                "label": comp.name,
-                "sub": COLUMN_LABELS[ctype],
-                "tier": TIER_BY_TYPE.get(ctype, "other"),
-                "type": ctype.value,
-                "x": x + NODE_X_OFFSET,
-                "y": y,
-                "path": comp.path or "",
-                "description": comp.description or "",
-                "tech_stack": list(comp.tech_stack or []),
-                "files_count": len(comp.files or []),
-                "routes_count": len(comp.api_routes or []),
-                "api_routes": [
-                    {
-                        "method": r.method,
-                        "path": r.path,
-                        "file": r.file,
-                    }
-                    for r in (comp.api_routes or [])[:25]
-                ],
-            }
-            nodes_list.append(node)
-            nodes_by_name[comp.name] = node
+
+        for comp in comps:
+            blueprints = _expand_component(comp)
+            # Choose step size based on how many sub-nodes we're stacking in
+            # this column overall — tighter when crowded.
+            step = NODE_Y_STEP_TIGHT if len(blueprints) >= TIGHT_PACK_THRESHOLD else NODE_Y_STEP
+
+            primary_node: dict | None = None
+            for bp in blueprints:
+                node_id = _safe_id(comp.name + "__" + bp["label"] + "__" + str(col_y))
+                node = {
+                    "id": node_id,
+                    "name": bp["label"],
+                    "label": bp["label"],
+                    "sub": bp["sub"],
+                    "tier": TIER_BY_TYPE.get(ctype, "low"),
+                    "type": ctype.value,
+                    "x": x + NODE_X_OFFSET,
+                    "y": col_y,
+                    "path": bp["path"],
+                    "description": bp["component_description"],
+                    "tech_stack": list(comp.tech_stack or []),
+                    "files_count": len(comp.files or []),
+                    "routes_count": len(bp.get("routes") or []) if bp["kind"] == "route_file" else len(comp.api_routes or []),
+                    "api_routes": bp.get("routes") or [],
+                    "kind": bp["kind"],
+                    "component_name": comp.name,
+                }
+                nodes_list.append(node)
+                nodes_by_id[node_id] = node
+                if primary_node is None:
+                    primary_node = node
+                col_y += step
+
+            # Map this component name to its *primary* sub-node so flow edges
+            # referencing the component land on a single anchor point.
+            if primary_node is not None:
+                nodes_by_component_name[comp.name] = primary_node
+
+            # Small gap between distinct components stacked in the same
+            # column (rare, but possible).
+            col_y += int(step * 0.4)
+
         col_index += 1
 
-    return nodes_by_name, nodes_list, layer_labels
+    return nodes_by_component_name, nodes_list, layer_labels, nodes_by_id
 
 
 def _build_flow_edges(
-    flows: Iterable[DataFlow], nodes_by_name: dict[str, dict]
+    flows: Iterable[DataFlow], nodes_by_component_name: dict[str, dict]
 ) -> list[dict]:
     edges: list[dict] = []
     for f in flows:
-        src = nodes_by_name.get(f.source)
-        tgt = nodes_by_name.get(f.target)
+        src = nodes_by_component_name.get(f.source)
+        tgt = nodes_by_component_name.get(f.target)
         if not src or not tgt:
             continue
         edges.append({
@@ -204,7 +379,11 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   :root{
     --bg:#0a0e17;--surface:#111827;--border:#1e293b;
     --text:#e2e8f0;--muted:#64748b;
+    --critical:#ef4444;--high:#f97316;--normal:#3b82f6;--low:#6b7280;
     --accent:#6366f1;--accent2:#8b5cf6;
+    --glow-critical:0 0 12px rgba(239,68,68,.5);
+    --glow-high:0 0 12px rgba(249,115,22,.45);
+    --glow-normal:0 0 12px rgba(59,130,246,.45);
     --glow-accent:0 0 14px rgba(99,102,241,.5);
   }
   html,body{height:100%;overflow:hidden;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text)}
@@ -250,36 +429,18 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .node .sub{font-size:10px;color:var(--muted);margin-top:2px}
   .node.selected{border-color:var(--accent);box-shadow:var(--glow-accent)}
 
-  /* tier colours — match Sales Coach palette where possible */
-  .node.tier-frontend{border-color:#3b82f6;box-shadow:0 0 10px rgba(59,130,246,.25)}
-  .node.tier-frontend:hover{box-shadow:0 0 18px rgba(59,130,246,.45)}
-  .node.tier-extension{border-color:#22d3ee;box-shadow:0 0 10px rgba(34,211,238,.25)}
-  .node.tier-extension:hover{box-shadow:0 0 18px rgba(34,211,238,.45)}
-  .node.tier-gateway{border-color:#f97316;box-shadow:0 0 10px rgba(249,115,22,.25)}
-  .node.tier-gateway:hover{box-shadow:0 0 18px rgba(249,115,22,.45)}
-  .node.tier-backend{border-color:#22c55e;box-shadow:0 0 10px rgba(34,197,94,.25)}
-  .node.tier-backend:hover{box-shadow:0 0 18px rgba(34,197,94,.45)}
-  .node.tier-mcp{border-color:#818cf8;box-shadow:0 0 10px rgba(129,140,248,.25)}
-  .node.tier-mcp:hover{box-shadow:0 0 18px rgba(129,140,248,.45)}
-  .node.tier-worker{border-color:#facc15;box-shadow:0 0 10px rgba(250,204,21,.25)}
-  .node.tier-worker:hover{box-shadow:0 0 18px rgba(250,204,21,.45)}
-  .node.tier-queue{border-color:#fb7185;box-shadow:0 0 10px rgba(251,113,133,.25)}
-  .node.tier-queue:hover{box-shadow:0 0 18px rgba(251,113,133,.45)}
-  .node.tier-auth{border-color:#eab308;box-shadow:0 0 10px rgba(234,179,8,.25)}
-  .node.tier-auth:hover{box-shadow:0 0 18px rgba(234,179,8,.45)}
-  .node.tier-cache{border-color:#f472b6;box-shadow:0 0 10px rgba(244,114,182,.25)}
-  .node.tier-cache:hover{box-shadow:0 0 18px rgba(244,114,182,.45)}
-  .node.tier-storage{border-color:#a3e635;box-shadow:0 0 10px rgba(163,230,53,.25)}
-  .node.tier-storage:hover{box-shadow:0 0 18px rgba(163,230,53,.45)}
-  .node.tier-database{border-color:#a855f7;box-shadow:0 0 10px rgba(168,85,247,.3)}
-  .node.tier-database:hover{box-shadow:0 0 18px rgba(168,85,247,.5)}
-  .node.tier-docker{border-color:#38bdf8;box-shadow:0 0 10px rgba(56,189,248,.25)}
-  .node.tier-docker:hover{box-shadow:0 0 18px rgba(56,189,248,.45)}
-  .node.tier-cicd{border-color:#14b8a6;box-shadow:0 0 10px rgba(20,184,166,.25)}
-  .node.tier-cicd:hover{box-shadow:0 0 18px rgba(20,184,166,.45)}
-  .node.tier-config{border-color:#94a3b8;box-shadow:0 0 8px rgba(148,163,184,.25)}
-  .node.tier-config:hover{box-shadow:0 0 18px rgba(148,163,184,.4)}
-  .node.tier-other{border-color:#6b7280;box-shadow:0 0 8px rgba(107,114,128,.25)}
+  /* tier colours — match Sales Coach palette exactly */
+  .node.tier-ext{border-color:#22d3ee;box-shadow:0 0 10px rgba(34,211,238,.25)}
+  .node.tier-ext:hover{box-shadow:0 0 18px rgba(34,211,238,.4)}
+  .node.tier-api{border-color:var(--accent);box-shadow:0 0 10px rgba(99,102,241,.25)}
+  .node.tier-api:hover{box-shadow:0 0 18px rgba(99,102,241,.4)}
+  .node.tier-critical{border-color:var(--critical);box-shadow:var(--glow-critical)}
+  .node.tier-high{border-color:var(--high);box-shadow:var(--glow-high)}
+  .node.tier-normal{border-color:var(--normal);box-shadow:var(--glow-normal)}
+  .node.tier-low{border-color:var(--low);box-shadow:0 0 8px rgba(107,114,128,.3)}
+  .node.tier-infra{border-color:var(--accent2);box-shadow:0 0 10px rgba(139,92,246,.25)}
+  .node.tier-infra:hover{box-shadow:0 0 18px rgba(139,92,246,.4)}
+  .node.tier-postcall{border-color:#facc15;box-shadow:0 0 10px rgba(250,204,21,.3)}
 
   /* layer labels */
   .layer-label{position:absolute;font-size:11px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);font-weight:700;opacity:.55;pointer-events:none}
@@ -355,16 +516,14 @@ const NODES = __NODES_JSON__;
 const FLOWS = __FLOWS_JSON__;
 const LAYER_LABELS = __LAYERS_JSON__;
 const TIER_COLORS = {
-  frontend:'#3b82f6', extension:'#22d3ee', gateway:'#f97316', backend:'#22c55e',
-  mcp:'#818cf8', worker:'#facc15', queue:'#fb7185', auth:'#eab308',
-  cache:'#f472b6', storage:'#a3e635', database:'#a855f7', docker:'#38bdf8',
-  cicd:'#14b8a6', config:'#94a3b8', other:'#6b7280'
+  ext:'#22d3ee', api:'#6366f1', infra:'#8b5cf6',
+  critical:'#ef4444', high:'#f97316', normal:'#3b82f6', low:'#6b7280',
+  postcall:'#facc15'
 };
 const TIER_NAMES = {
-  frontend:'Frontend', extension:'Extension', gateway:'API Gateway', backend:'Backend',
-  mcp:'MCP Server', worker:'Worker', queue:'Queue', auth:'Auth',
-  cache:'Cache', storage:'Storage', database:'Database', docker:'Docker',
-  cicd:'CI/CD', config:'Config', other:'Other'
+  ext:'Extension', api:'Backend API', infra:'Infrastructure',
+  critical:'Critical', high:'High', normal:'Normal', low:'Low',
+  postcall:'Post-Call'
 };
 
 const world  = document.getElementById('world');
@@ -599,28 +758,24 @@ window.addEventListener('resize', () => { buildEdges(); });
 def _legend_tiers_html(tiers_present: list[str]) -> str:
     """Build legend rows for the tiers actually shown in the diagram."""
     color_map = {
-        "frontend": "#3b82f6",
-        "extension": "#22d3ee",
-        "gateway": "#f97316",
-        "backend": "#22c55e",
-        "mcp": "#818cf8",
-        "worker": "#facc15",
-        "queue": "#fb7185",
-        "auth": "#eab308",
-        "cache": "#f472b6",
-        "storage": "#a3e635",
-        "database": "#a855f7",
-        "docker": "#38bdf8",
-        "cicd": "#14b8a6",
-        "config": "#94a3b8",
-        "other": "#6b7280",
+        "ext": "#22d3ee",
+        "api": "#6366f1",
+        "infra": "#8b5cf6",
+        "critical": "#ef4444",
+        "high": "#f97316",
+        "normal": "#3b82f6",
+        "low": "#6b7280",
+        "postcall": "#facc15",
     }
     label_map = {
-        "frontend": "Frontend", "extension": "Extension", "gateway": "API Gateway",
-        "backend": "Backend", "mcp": "MCP Server", "worker": "Worker",
-        "queue": "Queue", "auth": "Auth", "cache": "Cache", "storage": "Storage",
-        "database": "Database", "docker": "Docker", "cicd": "CI/CD",
-        "config": "Config", "other": "Other",
+        "ext": "Extension",
+        "api": "Backend API",
+        "infra": "Infrastructure",
+        "critical": "Critical",
+        "high": "High",
+        "normal": "Normal",
+        "low": "Low",
+        "postcall": "Post-Call",
     }
     rows = []
     for t in tiers_present:
@@ -645,8 +800,8 @@ def generate_interactive_html(arch: Architecture, project_name: str) -> str:
     Returns:
         A complete HTML document as a string.
     """
-    nodes_by_name, nodes_list, layer_labels = _layout(arch)
-    edges = _build_flow_edges(arch.data_flows, nodes_by_name)
+    nodes_by_component_name, nodes_list, layer_labels, _nodes_by_id = _layout(arch)
+    edges = _build_flow_edges(arch.data_flows, nodes_by_component_name)
 
     # Determine which tiers are actually present (for the legend)
     tiers_present: list[str] = []
