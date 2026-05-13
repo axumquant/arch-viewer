@@ -21,7 +21,7 @@ Environment variables:
   ARCH_VIEWER_PORT      Web dashboard port (default: 3777)
   ARCH_VIEWER_NO_AI     Set to "1" to disable AI analysis
 
-API keys are stored in .arch-viewer.keys.json in the project root.
+API keys are stored in .arch_viewer/keys.json in the project root.
 On first run without keys, the web dashboard prompts for key entry.
 """
 

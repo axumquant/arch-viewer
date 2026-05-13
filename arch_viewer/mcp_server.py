@@ -17,7 +17,7 @@ Usage in .claude/settings.json:
     }
   }
 
-API keys are stored in .arch-viewer.keys.json in the project root.
+API keys are stored in .arch_viewer/keys.json in the project root.
 """
 
 from __future__ import annotations

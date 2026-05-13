@@ -38,8 +38,10 @@
   /* Sidebar */
   .sidebar { width: 260px; min-width: 180px; background: var(--bg2); border-right: 1px solid var(--bg4); display: flex; flex-direction: column; overflow: hidden; }
   .sidebar-hdr { padding: 10px 12px; border-bottom: 1px solid var(--bg4); flex-shrink: 0; }
-  .sidebar-hdr input { width: 100%; background: var(--bg3); border: 1px solid var(--bg4); border-radius: 6px; padding: 6px 10px; color: var(--fg); font-size: 12px; outline: none; }
-  .sidebar-hdr input:focus { border-color: var(--accent); }
+  .sidebar-hdr input[type="text"], .sidebar-hdr input#treeFilter { width: 100%; background: var(--bg3); border: 1px solid var(--bg4); border-radius: 6px; padding: 6px 10px; color: var(--fg); font-size: 12px; outline: none; }
+  .sidebar-hdr input[type="text"]:focus, .sidebar-hdr input#treeFilter:focus { border-color: var(--accent); }
+  .show-hidden-toggle { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--fg3); margin-top: 6px; cursor: pointer; user-select: none; }
+  .show-hidden-toggle input[type="checkbox"] { width: 12px; height: 12px; accent-color: var(--accent); cursor: pointer; }
   .file-tree { flex: 1; overflow-y: auto; padding: 6px 0; font-size: 12px; }
   .ti { display: flex; align-items: center; gap: 5px; padding: 3px 12px; cursor: pointer; white-space: nowrap; user-select: none; }
   .ti:hover { background: var(--bg3); }
@@ -201,7 +203,12 @@
 </div>
 <div class="main">
   <div class="sidebar">
-    <div class="sidebar-hdr"><input id="treeFilter" placeholder="Filter files..."/></div>
+    <div class="sidebar-hdr">
+      <input id="treeFilter" placeholder="Filter files..."/>
+      <label class="show-hidden-toggle" title="Show hidden folders (.arch_viewer, .claude, .github)">
+        <input type="checkbox" id="showHiddenToggle" checked/> <span>Show dot folders</span>
+      </label>
+    </div>
     <div class="file-tree" id="fileTree"></div>
   </div>
   <div class="center">
@@ -227,7 +234,7 @@
 <div class="modal-overlay" id="settingsModal">
   <div class="modal">
     <h2>⚙ Provider & Model Settings</h2>
-    <div class="subtitle">Enter your API key, then select a model. Keys are stored locally in <code>.arch-viewer.keys.json</code></div>
+    <div class="subtitle">Enter your API key, then select a model. Keys are stored locally in <code>.arch_viewer/keys.json</code></div>
     <div id="keyRows"></div>
     <div style="font-size:11px;color:var(--fg2);margin-top:10px;">
       Active: <span class="active-provider" id="activeProvider">—</span>
@@ -317,6 +324,7 @@ function renderTree() {
 }
 
 function walkTree(container, node, depth, filter, prefix) {
+  const showHidden = document.getElementById("showHiddenToggle")?.checked ?? true;
   const entries = Object.entries(node).filter(([k]) => k !== "_file").sort(([a,av],[b,bv]) => {
     const aDir = !av._file, bDir = !bv._file;
     if (aDir && !bDir) return -1; if (!aDir && bDir) return 1; return a.localeCompare(b);
@@ -324,12 +332,15 @@ function walkTree(container, node, depth, filter, prefix) {
   for (const [name, val] of entries) {
     const path = prefix ? prefix+"/"+name : name;
     const isFile = !!val._file;
+    // Hide dot-folders/files unless toggle is on
+    if (!showHidden && name.startsWith(".")) continue;
     if (filter && isFile && !name.toLowerCase().includes(filter) && !path.toLowerCase().includes(filter)) continue;
     const d = document.createElement("div");
     d.className = "ti" + (S.activeTab===path?" active":"");
     d.style.paddingLeft = (12+depth*14)+"px";
     d.dataset.p = path;
-    d.innerHTML = `<span class="ic">${isFile ? fileIcon(val._file.category) : "📁"}</span><span class="nm">${name}</span>`;
+    const isDot = name.startsWith(".");
+    d.innerHTML = `<span class="ic">${isFile ? fileIcon(val._file.category) : "📁"}</span><span class="nm" ${isDot ? 'style="color:var(--fg3)"' : ""}>${name}</span>`;
     if (isFile) d.onclick = () => openFile(path);
     container.appendChild(d);
     if (!isFile) walkTree(container, val, depth+1, filter, path);
@@ -532,6 +543,7 @@ function mdToHtml(md) {
 // ─── Events ───
 document.querySelectorAll(".vb").forEach(b => b.onclick = () => { S.view=b.dataset.v; renderVB(); if(S.view==="editor")renderEditor(); });
 document.getElementById("treeFilter").addEventListener("input", renderTree);
+document.getElementById("showHiddenToggle").addEventListener("change", renderTree);
 document.getElementById("refreshBtn").onclick = () => { S.ws?.send(JSON.stringify({type:"refresh_ai"})); document.getElementById("refreshBtn").textContent="↻ Analyzing..."; setTimeout(()=>document.getElementById("refreshBtn").textContent="↻ Refresh", 30000); };
 
 let searchTO;

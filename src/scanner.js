@@ -72,7 +72,7 @@ function scanProject(rootDir, opts = {}) {
   let fileCount = 0;
 
   function shouldIgnore(name) {
-    if (name.startsWith(".") && name !== ".claude" && name !== ".github") return true;
+    if (name.startsWith(".") && name !== ".claude" && name !== ".github" && name !== ".arch_viewer") return true;
     return IGNORE_DIRS.has(name);
   }
 

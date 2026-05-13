@@ -26,6 +26,7 @@ Thumbs.db
 desktop.ini
 
 # Secrets — NEVER commit API keys
+.arch_viewer/keys.json
 .arch-viewer.keys.json
 .env
 .env.local

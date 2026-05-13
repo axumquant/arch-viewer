@@ -104,7 +104,9 @@ function startServer({ projectRoot, port = 3777, autoOpen = true }) {
 
   // ---------- API Key Management ----------
 
-  const KEYS_FILENAME = ".arch-viewer.keys.json";
+  const CONFIG_DIR = ".arch_viewer";
+  const KEYS_FILENAME = "keys.json";
+  const LEGACY_KEYS_FILE = ".arch-viewer.keys.json";
   const PROVIDERS = {
     ollama: {
       display: "Ollama Cloud", env_var: "OLLAMA_API_KEY",
@@ -147,8 +149,21 @@ function startServer({ projectRoot, port = 3777, autoOpen = true }) {
     },
   };
 
+  function _migrateLegacyKeys() {
+    const legacyPath = path.join(projectRoot, LEGACY_KEYS_FILE);
+    const newDir = path.join(projectRoot, CONFIG_DIR);
+    const newPath = path.join(newDir, KEYS_FILENAME);
+    if (fs.existsSync(legacyPath) && !fs.existsSync(newPath)) {
+      console.log(`  Migrating keys from ${LEGACY_KEYS_FILE} → ${CONFIG_DIR}/${KEYS_FILENAME}`);
+      fs.mkdirSync(newDir, { recursive: true });
+      fs.copyFileSync(legacyPath, newPath);
+      fs.unlinkSync(legacyPath);
+    }
+  }
+
   function loadKeys() {
-    const keysPath = path.join(projectRoot, KEYS_FILENAME);
+    _migrateLegacyKeys();
+    const keysPath = path.join(projectRoot, CONFIG_DIR, KEYS_FILENAME);
     try {
       if (fs.existsSync(keysPath)) {
         return JSON.parse(fs.readFileSync(keysPath, "utf8"));
@@ -158,7 +173,9 @@ function startServer({ projectRoot, port = 3777, autoOpen = true }) {
   }
 
   function saveKeys(newKeys, selectedModels) {
-    const keysPath = path.join(projectRoot, KEYS_FILENAME);
+    const configDir = path.join(projectRoot, CONFIG_DIR);
+    fs.mkdirSync(configDir, { recursive: true });
+    const keysPath = path.join(configDir, KEYS_FILENAME);
     const existing = loadKeys();
     for (const [k, v] of Object.entries(newKeys)) {
       if (typeof v === "string" && v.trim() && PROVIDERS[k]) {

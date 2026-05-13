@@ -8,7 +8,7 @@ Supported providers (online only — no local models):
   - anthropic → Anthropic API
   - groq      → Groq API
 
-API keys are stored in .arch-viewer.keys.json in the project root.
+API keys are stored in .arch_viewer/keys.json in the project root.
 After a key is accepted, the user selects a model from the provider's catalog.
 """
 
@@ -28,7 +28,9 @@ from .models import Architecture, Component, DataFlow, DataFlowDirection
 
 log = logging.getLogger("arch-viewer.agent")
 
-KEYS_FILENAME = ".arch-viewer.keys.json"
+CONFIG_DIR = ".arch_viewer"
+KEYS_FILENAME = "keys.json"
+LEGACY_KEYS_FILE = ".arch-viewer.keys.json"
 
 
 # ─── Structured Output Models ───
@@ -140,27 +142,50 @@ PROVIDERS: dict[str, dict] = {
 # ─── API Key Management ───
 
 
+def _keys_path(project_root: str | Path) -> Path:
+    """Return the canonical keys path: <project>/.arch_viewer/keys.json"""
+    return Path(project_root) / CONFIG_DIR / KEYS_FILENAME
+
+
+def _migrate_legacy_keys(project_root: str | Path) -> None:
+    """Auto-migrate from old .arch-viewer.keys.json to .arch_viewer/keys.json."""
+    root = Path(project_root)
+    legacy = root / LEGACY_KEYS_FILE
+    new_dir = root / CONFIG_DIR
+    new_path = new_dir / KEYS_FILENAME
+
+    if legacy.exists() and not new_path.exists():
+        log.info("Migrating keys from %s to %s", legacy, new_path)
+        new_dir.mkdir(parents=True, exist_ok=True)
+        data = legacy.read_text(encoding="utf-8")
+        new_path.write_text(data, encoding="utf-8")
+        legacy.unlink()  # remove old file after migration
+
+
 def load_keys(project_root: str | Path) -> dict:
     """
-    Load API keys and model selections from .arch-viewer.keys.json.
+    Load API keys and model selections from .arch_viewer/keys.json.
+    Auto-migrates from legacy .arch-viewer.keys.json if found.
     Returns dict like:
       {"openai": "sk-...", "selected_models": {"openai": "gpt-4.1-mini"}}
     """
-    keys_path = Path(project_root) / KEYS_FILENAME
+    _migrate_legacy_keys(project_root)
+    keys_path = _keys_path(project_root)
     if keys_path.exists():
         try:
             return json.loads(keys_path.read_text(encoding="utf-8"))
         except Exception as e:
-            log.warning("Failed to read %s: %s", KEYS_FILENAME, e)
+            log.warning("Failed to read %s: %s", keys_path, e)
     return {}
 
 
 def save_keys(project_root: str | Path, keys: dict[str, str], selected_models: dict[str, str] | None = None) -> None:
     """
-    Save API keys and model selections to .arch-viewer.keys.json.
-    Merges with existing data.
+    Save API keys and model selections to .arch_viewer/keys.json.
+    Creates the .arch_viewer/ directory if it doesn't exist. Merges with existing data.
     """
-    keys_path = Path(project_root) / KEYS_FILENAME
+    keys_path = _keys_path(project_root)
+    keys_path.parent.mkdir(parents=True, exist_ok=True)
     existing = load_keys(project_root)
 
     # Merge keys (provider name → api key string)

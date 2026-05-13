@@ -119,7 +119,7 @@ class _Handler(FileSystemEventHandler):
             if part in IGNORE_DIRS:
                 return True
             # Allow .claude and .github but skip other dotfiles
-            if part.startswith(".") and part not in (".claude", ".github"):
+            if part.startswith(".") and part not in (".claude", ".github", ".arch_viewer"):
                 return True
         ext = os.path.splitext(path)[1].lower()
         if ext in IGNORE_EXTS:

@@ -68,7 +68,7 @@ def scan_project(root: str | Path, max_files: int = 5000) -> Architecture:
         # Prune ignored dirs
         dirnames[:] = [
             d for d in dirnames
-            if d not in IGNORE_DIRS and not (d.startswith(".") and d not in (".claude", ".github"))
+            if d not in IGNORE_DIRS and not (d.startswith(".") and d not in (".claude", ".github", ".arch_viewer"))
         ]
 
         rel_dir = os.path.relpath(dirpath, root)
