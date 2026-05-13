@@ -780,15 +780,12 @@ async function refreshGraph() {
       // Embed Neo4j browser
       if (frame.src !== (g.browser_url + "/")) frame.src = g.browser_url || "http://localhost:7474";
     } else {
-      stEl.innerHTML = '<span class="status-pill off">○ Not connected</span>';
+      stEl.innerHTML = '<span class="status-pill off">○ Disconnected</span>';
       sumEl.innerHTML = `
-        <div style="color:var(--fg2);font-size:13px;line-height:1.6">
-          <strong style="color:var(--yellow)">Neo4j is not running.</strong><br>
-          To activate the graph store:<br>
-          <code style="background:var(--bg3);padding:2px 8px;border-radius:4px;display:inline-block;margin-top:6px">docker compose up -d neo4j</code><br>
-          <code style="background:var(--bg3);padding:2px 8px;border-radius:4px;display:inline-block;margin-top:4px">pip install -e ".[graph]"</code>
-          <div style="margin-top:10px;font-size:11px;color:var(--fg3)">Once running, the graph view auto-syncs your project's architecture into a knowledge graph at <code>http://localhost:7474</code></div>
-          ${g.error ? '<div style="color:var(--red);margin-top:8px;font-size:11px">Error: ' + g.error + '</div>' : ''}
+        <div style="color:var(--red);font-size:13px;line-height:1.6">
+          <strong>Neo4j disconnected.</strong> The bootstrap should have prevented this.<br>
+          Run <code>docker compose restart neo4j</code> or restart arch-viewer.
+          ${g.error ? '<div style="margin-top:8px;font-size:11px;color:var(--fg3)">Error: ' + g.error + '</div>' : ''}
         </div>`;
       frame.src = "about:blank";
     }
@@ -813,7 +810,7 @@ async function refreshMemory() {
     const ok = m.available;
     stEl.innerHTML = ok ?
       `<span class="status-pill ok">● ${m.backend}</span>` :
-      `<span class="status-pill off">○ ${m.backend||"flat-file fallback"}</span>`;
+      `<span class="status-pill off">○ Disconnected</span>`;
 
     let html = `
       <div style="display:flex;gap:10px;margin-bottom:20px">
@@ -824,11 +821,8 @@ async function refreshMemory() {
       </div>`;
 
     if (!ok) {
-      html += `<div style="background:var(--bg2);border:1px solid var(--bg4);border-radius:8px;padding:14px;margin-bottom:20px;font-size:11px;color:var(--fg2);line-height:1.6">
-        <strong style="color:var(--yellow)">Mem0 vector store is not connected — using flat-file fallback at <code>.arch_viewer/memory.json</code></strong><br>
-        To enable semantic memory:<br>
-        <code style="background:var(--bg3);padding:2px 6px;border-radius:3px;margin-top:4px;display:inline-block">docker compose up -d qdrant</code>
-        <code style="background:var(--bg3);padding:2px 6px;border-radius:3px;margin-top:4px;display:inline-block;margin-left:4px">pip install -e ".[graph]"</code>
+      html += `<div style="background:var(--bg2);border:1px solid var(--red);border-radius:8px;padding:14px;margin-bottom:20px;font-size:11px;color:var(--red);line-height:1.6">
+        <strong>Mem0 vector store is disconnected.</strong> The bootstrap should have prevented this — try <code>docker compose restart qdrant</code> or restart arch-viewer.
       </div>`;
     }
 
