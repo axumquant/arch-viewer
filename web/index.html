@@ -261,6 +261,20 @@
   .btn-cancel:hover { color: var(--fg); }
   .active-provider { display: inline-block; padding: 2px 8px; border-radius: 4px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 600; }
 
+  /* Graph + Memory views */
+  #graphView, #memoryView { position: relative; }
+  #graphView.active, #memoryView.active { display: flex; flex-direction: column; }
+  .stat-card { display: inline-block; background: var(--bg2); border: 1px solid var(--bg4); border-radius: 8px; padding: 10px 16px; margin-right: 10px; min-width: 120px; }
+  .stat-card .stat-num { font-size: 22px; font-weight: 700; color: var(--accent); }
+  .stat-card .stat-lbl { font-size: 10px; color: var(--fg3); text-transform: uppercase; letter-spacing: 0.5px; }
+  .status-pill { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .status-pill.ok { background: rgba(63,185,80,0.2); color: var(--green); border: 1px solid var(--green); }
+  .status-pill.off { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid var(--red); }
+  .mem-section { margin-bottom: 20px; }
+  .mem-section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--fg2); margin-bottom: 8px; }
+  .mem-item { background: var(--bg2); border: 1px solid var(--bg4); border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; font-size: 11px; }
+  .mem-item .mem-meta { color: var(--fg3); font-size: 10px; margin-top: 4px; }
+
   ::-webkit-scrollbar { width: 7px; height: 7px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 4px; }
@@ -296,6 +310,8 @@
     <div class="view-bar">
       <button class="vb active" data-v="arch">Architecture</button>
       <button class="vb" data-v="diagram">Diagram</button>
+      <button class="vb" data-v="graph">🔗 Neo4j</button>
+      <button class="vb" data-v="memory">🧠 Mem0</button>
       <button class="vb" data-v="editor">Editor</button>
       <button class="vb" data-v="activity">Activity</button>
     </div>
@@ -328,6 +344,26 @@
           </div>
         </div>
         <div class="diag-legend" id="diagramLegend"></div>
+      </div>
+      <div class="pane" id="graphView">
+        <div class="diag-toolbar">
+          <span style="color:var(--fg);font-weight:600">🔗 Neo4j Knowledge Graph</span>
+          <span id="graphStatus" style="font-size:11px;color:var(--fg3)">checking...</span>
+          <button onclick="refreshGraph()" style="margin-left:auto">↻ Refresh</button>
+          <button onclick="openInline('http://localhost:7474')">View Neo4j Browser</button>
+        </div>
+        <div style="flex:1;overflow:hidden;display:flex;flex-direction:column;background:var(--bg)">
+          <div id="graphSummary" style="padding:16px 20px;border-bottom:1px solid var(--bg4)"></div>
+          <iframe id="graphFrame" src="about:blank" style="flex:1;border:none;background:#fff"></iframe>
+        </div>
+      </div>
+      <div class="pane" id="memoryView">
+        <div class="diag-toolbar">
+          <span style="color:var(--fg);font-weight:600">🧠 Mem0 Semantic Memory</span>
+          <span id="memStatus" style="font-size:11px;color:var(--fg3)">checking...</span>
+          <button onclick="refreshMemory()" style="margin-left:auto">↻ Refresh</button>
+        </div>
+        <div id="memoryContent" style="flex:1;overflow-y:auto;padding:20px;font-size:12px"></div>
       </div>
       <div class="pane" id="editorView"></div>
       <div class="pane" id="activityView"><div class="act-empty">Watching for file changes...</div></div>
@@ -713,9 +749,120 @@ function renderVB() {
   document.querySelectorAll(".vb").forEach(b => b.classList.toggle("active", b.dataset.v===S.view));
   document.getElementById("archView").classList.toggle("active", S.view==="arch");
   document.getElementById("diagramView").classList.toggle("active", S.view==="diagram");
+  document.getElementById("graphView").classList.toggle("active", S.view==="graph");
+  document.getElementById("memoryView").classList.toggle("active", S.view==="memory");
   document.getElementById("editorView").classList.toggle("active", S.view==="editor");
   document.getElementById("activityView").classList.toggle("active", S.view==="activity");
   if (S.view==="diagram") renderDiagram();
+  if (S.view==="graph") refreshGraph();
+  if (S.view==="memory") refreshMemory();
+}
+
+// ─── Neo4j Graph View ───
+async function refreshGraph() {
+  try {
+    const r = await (await fetch("/api/graph/status")).json();
+    const g = r.neo4j || {};
+    const sumEl = document.getElementById("graphSummary");
+    const stEl = document.getElementById("graphStatus");
+    const frame = document.getElementById("graphFrame");
+
+    if (g.available) {
+      stEl.innerHTML = '<span class="status-pill ok">● Connected</span>';
+      sumEl.innerHTML = `
+        <div style="margin-bottom:8px;color:var(--fg);font-size:13px">
+          Knowledge Graph at <code style="color:var(--accent)">${g.url||"bolt://localhost:7687"}</code>
+        </div>
+        <div class="stat-card"><div class="stat-num">${g.component_count||0}</div><div class="stat-lbl">Components</div></div>
+        <div class="stat-card"><div class="stat-num">${g.dependency_count||0}</div><div class="stat-lbl">Dependencies</div></div>
+        <div class="stat-card"><div class="stat-num">${g.flow_count||0}</div><div class="stat-lbl">Data Flows</div></div>
+        <div style="margin-top:12px;font-size:11px;color:var(--fg3)">Neo4j Browser embedded below — login: <code>neo4j</code> / password from .env</div>`;
+      // Embed Neo4j browser
+      if (frame.src !== (g.browser_url + "/")) frame.src = g.browser_url || "http://localhost:7474";
+    } else {
+      stEl.innerHTML = '<span class="status-pill off">○ Not connected</span>';
+      sumEl.innerHTML = `
+        <div style="color:var(--fg2);font-size:13px;line-height:1.6">
+          <strong style="color:var(--yellow)">Neo4j is not running.</strong><br>
+          To activate the graph store:<br>
+          <code style="background:var(--bg3);padding:2px 8px;border-radius:4px;display:inline-block;margin-top:6px">docker compose up -d neo4j</code><br>
+          <code style="background:var(--bg3);padding:2px 8px;border-radius:4px;display:inline-block;margin-top:4px">pip install -e ".[graph]"</code>
+          <div style="margin-top:10px;font-size:11px;color:var(--fg3)">Once running, the graph view auto-syncs your project's architecture into a knowledge graph at <code>http://localhost:7474</code></div>
+          ${g.error ? '<div style="color:var(--red);margin-top:8px;font-size:11px">Error: ' + g.error + '</div>' : ''}
+        </div>`;
+      frame.src = "about:blank";
+    }
+  } catch (e) {
+    document.getElementById("graphStatus").innerHTML = '<span class="status-pill off">○ Error</span>';
+    document.getElementById("graphSummary").innerHTML = '<div style="color:var(--red)">Failed to check graph status: ' + e.message + '</div>';
+  }
+}
+
+function openInline(url) {
+  document.getElementById("graphFrame").src = url;
+}
+
+// ─── Mem0 Memory View ───
+async function refreshMemory() {
+  try {
+    const r = await (await fetch("/api/memory")).json();
+    const stEl = document.getElementById("memStatus");
+    const c = document.getElementById("memoryContent");
+
+    const m = r.mem0 || {};
+    const ok = m.available;
+    stEl.innerHTML = ok ?
+      `<span class="status-pill ok">● ${m.backend}</span>` :
+      `<span class="status-pill off">○ ${m.backend||"flat-file fallback"}</span>`;
+
+    let html = `
+      <div style="display:flex;gap:10px;margin-bottom:20px">
+        <div class="stat-card"><div class="stat-num">${(r.patterns||[]).length}</div><div class="stat-lbl">Patterns</div></div>
+        <div class="stat-card"><div class="stat-num">${(r.corrections||[]).length}</div><div class="stat-lbl">Corrections</div></div>
+        <div class="stat-card"><div class="stat-num">${(r.history||[]).length}</div><div class="stat-lbl">Analyses</div></div>
+        ${ok ? '<div class="stat-card"><div class="stat-num">' + (m.vector_count||0) + '</div><div class="stat-lbl">Vectors</div></div>' : ''}
+      </div>`;
+
+    if (!ok) {
+      html += `<div style="background:var(--bg2);border:1px solid var(--bg4);border-radius:8px;padding:14px;margin-bottom:20px;font-size:11px;color:var(--fg2);line-height:1.6">
+        <strong style="color:var(--yellow)">Mem0 vector store is not connected — using flat-file fallback at <code>.arch_viewer/memory.json</code></strong><br>
+        To enable semantic memory:<br>
+        <code style="background:var(--bg3);padding:2px 6px;border-radius:3px;margin-top:4px;display:inline-block">docker compose up -d qdrant</code>
+        <code style="background:var(--bg3);padding:2px 6px;border-radius:3px;margin-top:4px;display:inline-block;margin-left:4px">pip install -e ".[graph]"</code>
+      </div>`;
+    }
+
+    html += `<div class="mem-section"><h3>Recent Patterns</h3>`;
+    const pats = (r.patterns||[]).slice(-10).reverse();
+    if (!pats.length) html += '<div style="color:var(--fg3);font-size:11px">No patterns learned yet.</div>';
+    else pats.forEach(p => {
+      html += `<div class="mem-item">${esc(p.text||p.description||JSON.stringify(p).slice(0,200))}<div class="mem-meta">${p.created_at||p.timestamp||""}</div></div>`;
+    });
+    html += `</div>`;
+
+    html += `<div class="mem-section"><h3>Recent Corrections</h3>`;
+    const corrs = (r.corrections||[]).slice(-10).reverse();
+    if (!corrs.length) html += '<div style="color:var(--fg3);font-size:11px">No corrections recorded yet.</div>';
+    else corrs.forEach(c2 => {
+      html += `<div class="mem-item"><strong style="color:var(--red)">${esc(c2.original||"")}</strong> → <strong style="color:var(--green)">${esc(c2.corrected||"")}</strong>
+        <div class="mem-meta">${esc(c2.context||c2.notes||"")}</div></div>`;
+    });
+    html += `</div>`;
+
+    html += `<div class="mem-section"><h3>Analysis History</h3>`;
+    const hist = (r.history||[]).slice(0,10);
+    if (!hist.length) html += '<div style="color:var(--fg3);font-size:11px">No analyses recorded yet.</div>';
+    else hist.forEach(h => {
+      html += `<div class="mem-item">v${h.version||"?"} · ${h.component_count||0} components · ${h.flow_count||0} flows
+        <div class="mem-meta">${h.timestamp||""}</div></div>`;
+    });
+    html += `</div>`;
+
+    c.innerHTML = html;
+  } catch (e) {
+    document.getElementById("memStatus").innerHTML = '<span class="status-pill off">○ Error</span>';
+    document.getElementById("memoryContent").innerHTML = '<div style="color:var(--red)">Failed: ' + e.message + '</div>';
+  }
 }
 
 // ─── Interactive Architecture Diagram (HTML/SVG — no library) ───

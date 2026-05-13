@@ -272,19 +272,23 @@ def resolve_model(provider: str, model_name: str | None = None, project_root: st
     # Ollama Cloud uses OpenAI-compatible API with custom base_url
     if provider == "ollama":
         try:
-            import openai as openai_lib
-            from pydantic_ai.models.openai import OpenAIModel
+            # pydantic-ai >= 0.1 uses OpenAIChatModel + OpenAIProvider
+            try:
+                from pydantic_ai.models.openai import OpenAIChatModel as _OpenAIModel
+            except ImportError:
+                from pydantic_ai.models.openai import OpenAIModel as _OpenAIModel
+            from pydantic_ai.providers.openai import OpenAIProvider
 
             api_key = os.environ.get("OLLAMA_API_KEY", "")
-            client = openai_lib.AsyncOpenAI(
+            prov = OpenAIProvider(
                 base_url=PROVIDERS["ollama"]["base_url"],
                 api_key=api_key,
             )
-            return OpenAIModel(model_name, openai_client=client)
-        except ImportError:
+            return _OpenAIModel(model_name, provider=prov)
+        except ImportError as e:
             raise ImportError(
-                "Ollama Cloud requires the 'openai' package. "
-                "Install with: pip install openai"
+                "Ollama Cloud requires pydantic-ai with OpenAI support. "
+                f"Original error: {e}"
             )
 
     # Standard providers: return pydantic-ai model string
@@ -316,7 +320,7 @@ class ArchitectureAgent:
         # Summary agent — generates project-level overview
         self._summary_agent = Agent(
             model=self._model,
-            result_type=ArchitectureSummary,
+            output_type=ArchitectureSummary,
             system_prompt=(
                 "You are a software architecture analyst. Given a project's file structure, "
                 "components, tech stack, and code samples, produce a concise architecture summary. "
@@ -328,7 +332,7 @@ class ArchitectureAgent:
         # Component agent — analyzes individual components
         self._component_agent = Agent(
             model=self._model,
-            result_type=ComponentAnalysis,
+            output_type=ComponentAnalysis,
             system_prompt=(
                 "You are a software architecture analyst. Given a component's file listing, "
                 "tech stack, and code samples, describe what this component does, what patterns it uses, "
@@ -420,13 +424,13 @@ class ArchitectureAgent:
         """Analyze a single component by reading its key files."""
         context = self._build_component_context(comp, root, sample_limit)
         result = await self._component_agent.run(context)
-        return result.data
+        return getattr(result, "output", None) or getattr(result, "data", None)
 
     async def _generate_summary(self, arch: Architecture, root: Path) -> ArchitectureSummary:
         """Generate project-level architecture summary."""
         context = self._build_summary_context(arch, root)
         result = await self._summary_agent.run(context)
-        return result.data
+        return getattr(result, "output", None) or getattr(result, "data", None)
 
     def _build_component_context(self, comp: Component, root: Path, sample_limit: int) -> str:
         """Build a text context for component analysis."""
@@ -531,7 +535,7 @@ class ArchitectureAgent:
             result = await self._component_agent.run(
                 f"Summarize this file in one sentence:\n\nFile: {file_path}\n\n{content[:3000]}"
             )
-            return result.data.description
+            return getattr(result, "output", None) or getattr(result, "data", None).description
         except Exception as e:
             return f"(analysis failed: {e})"
 

@@ -395,6 +395,77 @@ async def start_web_server(arch_mcp, port: int = 3777):
             "project_name": project_name,
         })
 
+    async def handle_api_diagram_html(request):
+        """Return the generated HTML directly (for iframe embedding, no file write)."""
+        from .diagram_generator import generate_interactive_html
+        arch = arch_mcp.get_architecture()
+        if not arch:
+            return web.Response(text="<h3 style='color:#888;padding:40px;font-family:sans-serif'>Project not scanned yet.</h3>", content_type="text/html")
+        project_name = arch.project_name or root.name
+        html = generate_interactive_html(arch, project_name)
+        return web.Response(text=html, content_type="text/html")
+
+    async def handle_api_memory(request):
+        """Return memory store status + recent patterns/corrections."""
+        try:
+            from .memory import load_memory, get_analysis_history
+            from .mem_store import MemStore
+            mem = load_memory(root)
+            history = get_analysis_history(root, limit=10)
+
+            # Try connecting to Mem0
+            mem_info = {"available": False, "vector_count": 0, "backend": "flat-file"}
+            try:
+                store = MemStore(project_root=root)
+                if store.connect():
+                    mem_info["available"] = True
+                    mem_info["backend"] = "mem0 + qdrant"
+                    try:
+                        results = store.search("", limit=100) or []
+                        mem_info["vector_count"] = len(results)
+                    except Exception:
+                        pass
+            except Exception as e:
+                mem_info["error"] = str(e)
+
+            return web.json_response({
+                "ok": True,
+                "patterns": (mem.get("patterns") or [])[-30:],
+                "corrections": (mem.get("corrections") or [])[-30:],
+                "history": history,
+                "mem0": mem_info,
+            })
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)})
+
+    async def handle_api_graph_status(request):
+        """Check Neo4j connection status + node counts."""
+        try:
+            from .graph_store import GraphStore
+            status = {"available": False, "url": os.environ.get("NEO4J_URI", "bolt://localhost:7687")}
+            try:
+                gs = GraphStore(project_root=root)
+                if gs.connect():
+                    status["available"] = True
+                    try:
+                        # Count nodes for this project
+                        with gs._driver.session() as session:
+                            comp = session.run("MATCH (c:Component {project: $p}) RETURN count(c) AS n", p=gs.project_id).single()
+                            dep = session.run("MATCH (a)-[r:DEPENDS_ON {project: $p}]->(b) RETURN count(r) AS n", p=gs.project_id).single()
+                            flow = session.run("MATCH (a)-[r:DATA_FLOW {project: $p}]->(b) RETURN count(r) AS n", p=gs.project_id).single()
+                            status["component_count"] = comp["n"] if comp else 0
+                            status["dependency_count"] = dep["n"] if dep else 0
+                            status["flow_count"] = flow["n"] if flow else 0
+                        status["browser_url"] = "http://localhost:7474"
+                    except Exception as e:
+                        status["query_error"] = str(e)
+                    gs.close()
+            except Exception as e:
+                status["error"] = str(e)
+            return web.json_response({"ok": True, "neo4j": status})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)})
+
     # ─── App Setup ───
 
     app = web.Application()
@@ -418,6 +489,9 @@ async def start_web_server(arch_mcp, port: int = 3777):
     app.router.add_get("/api/dep-graph", handle_api_dep_graph)
     app.router.add_get("/api/anti-patterns", handle_api_anti_patterns)
     app.router.add_post("/api/diagram/generate", handle_api_diagram_generate)
+    app.router.add_get("/api/diagram/html", handle_api_diagram_html)
+    app.router.add_get("/api/memory", handle_api_memory)
+    app.router.add_get("/api/graph/status", handle_api_graph_status)
 
     runner = web.AppRunner(app)
     await runner.setup()
