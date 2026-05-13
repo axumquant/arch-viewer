@@ -43,7 +43,7 @@ services:
   arch-viewer:
     # Optional: build & run the Python app inside the same compose stack.
     # Comment this service out if you'd rather run arch-viewer directly on the host.
-    image: python:3.12-slim
+    image: python:3.14-slim
     container_name: arch-viewer-app
     profiles: ["app"]   # only starts when `--profile app` is passed
     working_dir: /workspace
