@@ -366,6 +366,102 @@ def _build_flow_edges(
     return edges
 
 
+def _build_cohesion_edges(nodes_list: list[dict]) -> list[dict]:
+    """
+    Build subtle internal edges between sub-nodes of the same component
+    (consecutive vertical pairs). Shows that sub-nodes belong to one logical unit.
+    """
+    edges: list[dict] = []
+    # Group nodes by component_name, preserve order
+    by_comp: "OrderedDict[str, list[dict]]" = OrderedDict()
+    for n in nodes_list:
+        cname = n.get("component_name") or n.get("label", "")
+        by_comp.setdefault(cname, []).append(n)
+    for cname, subs in by_comp.items():
+        if len(subs) < 2:
+            continue
+        for a, b in zip(subs, subs[1:]):
+            edges.append({
+                "from": a["id"],
+                "to": b["id"],
+                "cls": "cohesion",
+                "protocol": "",
+                "description": f"{cname} internal",
+                "bidi": False,
+            })
+    return edges
+
+
+def _build_import_edges(
+    arch: Architecture, nodes_list: list[dict]
+) -> list[dict]:
+    """
+    Infer file-to-file edges from FileInfo.imports. We only emit an edge
+    if BOTH the importer and the imported target map to known sub-nodes
+    (by file basename match) so the diagram doesn't explode.
+    """
+    edges: list[dict] = []
+
+    # Build a flat list of FileInfo from arch.file_tree
+    file_infos = _flatten_file_tree(arch.file_tree)
+    if not file_infos:
+        return edges
+
+    # Map basename -> node id (for nodes whose `path` looks like a file)
+    name_to_node: dict[str, str] = {}
+    for n in nodes_list:
+        bp = _basename(n.get("path") or "")
+        if bp and bp not in name_to_node:
+            name_to_node[bp] = n["id"]
+
+    seen: set[tuple[str, str]] = set()
+    for fi in file_infos:
+        from_base = _basename(fi.get("path", ""))
+        from_id = name_to_node.get(from_base)
+        if not from_id:
+            continue
+        for imp in (fi.get("imports") or []):
+            imp_base = _basename(imp.replace(".", "/")) or imp
+            # Try multiple normalizations
+            candidates = [imp_base, imp_base + ".py", imp_base + ".js", imp_base + ".ts", imp_base + ".tsx"]
+            target_id = None
+            for c in candidates:
+                if c in name_to_node:
+                    target_id = name_to_node[c]
+                    break
+            if not target_id or target_id == from_id:
+                continue
+            key = (from_id, target_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            edges.append({
+                "from": from_id,
+                "to": target_id,
+                "cls": "import",
+                "protocol": "import",
+                "description": "",
+                "bidi": False,
+            })
+    return edges
+
+
+def _flatten_file_tree(tree: dict, prefix: str = "") -> list[dict]:
+    """Walk Architecture.file_tree dict and collect all FileInfo-like dicts."""
+    out: list[dict] = []
+    if not isinstance(tree, dict):
+        return out
+    for key, val in tree.items():
+        if key == "_file" and isinstance(val, dict):
+            out.append(val)
+        elif isinstance(val, dict):
+            if "_file" in val:
+                out.append(val["_file"])
+            else:
+                out.extend(_flatten_file_tree(val, f"{prefix}/{key}"))
+    return out
+
+
 # ─── HTML template ───────────────────────────────────────────────────────────
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
@@ -454,10 +550,13 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .edge.queue{stroke:#fb7185}
   .edge.db{stroke:#a3e635}
   .edge.default{stroke:#94a3b8}
+  .edge.import{stroke:#475569;opacity:.25;stroke-dasharray:2 4}
+  .edge.cohesion{stroke:#334155;opacity:.18;stroke-dasharray:1 5;stroke-width:1}
 
   /* animated dash */
   @keyframes dash{to{stroke-dashoffset:-24}}
   .edge-anim{stroke-dasharray:8 16;animation:dash 1.2s linear infinite;opacity:.6}
+  .edge.import.edge-anim, .edge.cohesion.edge-anim{animation:none;stroke-dasharray:2 4}
 
   /* zoom hint */
   #zoom-hint{position:fixed;bottom:16px;right:16px;font-size:11px;color:var(--muted);z-index:100;background:rgba(17,24,39,.8);padding:6px 12px;border-radius:6px;border:1px solid var(--border)}
@@ -801,7 +900,10 @@ def generate_interactive_html(arch: Architecture, project_name: str) -> str:
         A complete HTML document as a string.
     """
     nodes_by_component_name, nodes_list, layer_labels, _nodes_by_id = _layout(arch)
-    edges = _build_flow_edges(arch.data_flows, nodes_by_component_name)
+    flow_edges = _build_flow_edges(arch.data_flows, nodes_by_component_name)
+    cohesion_edges = _build_cohesion_edges(nodes_list)
+    import_edges = _build_import_edges(arch, nodes_list)
+    edges = flow_edges + import_edges + cohesion_edges
 
     # Determine which tiers are actually present (for the legend)
     tiers_present: list[str] = []

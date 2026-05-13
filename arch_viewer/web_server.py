@@ -450,9 +450,9 @@ async def start_web_server(arch_mcp, port: int = 3777):
                     try:
                         # Count nodes for this project
                         with gs._driver.session() as session:
-                            comp = session.run("MATCH (c:Component {project: $p}) RETURN count(c) AS n", p=gs.project_id).single()
-                            dep = session.run("MATCH (a)-[r:DEPENDS_ON {project: $p}]->(b) RETURN count(r) AS n", p=gs.project_id).single()
-                            flow = session.run("MATCH (a)-[r:DATA_FLOW {project: $p}]->(b) RETURN count(r) AS n", p=gs.project_id).single()
+                            comp = session.run("MATCH (c:Component {project_id: $p}) RETURN count(c) AS n", p=gs.project_id).single()
+                            dep = session.run("MATCH (d:Dependency {project_id: $p}) RETURN count(d) AS n", p=gs.project_id).single()
+                            flow = session.run("MATCH (a)-[r:FLOWS_TO {project_id: $p}]->(b) RETURN count(r) AS n", p=gs.project_id).single()
                             status["component_count"] = comp["n"] if comp else 0
                             status["dependency_count"] = dep["n"] if dep else 0
                             status["flow_count"] = flow["n"] if flow else 0

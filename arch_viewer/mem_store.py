@@ -63,8 +63,17 @@ class MemStore:
 
         # Load OpenAI key from project config if present
         self._ensure_openai_key()
+        # Also try Ollama Cloud as fallback (OpenAI-compatible API)
         if not os.environ.get("OPENAI_API_KEY"):
-            log.info("OPENAI_API_KEY not set — MemStore disabled "
+            ollama_key = self._load_ollama_key()
+            if ollama_key:
+                # Route OpenAI client calls to Ollama Cloud base URL
+                os.environ["OPENAI_API_KEY"] = ollama_key
+                os.environ["OPENAI_BASE_URL"] = "https://ollama.com/v1"
+                self._use_ollama = True
+                log.info("MemStore: using Ollama Cloud as OpenAI-compatible embedder backend")
+        if not os.environ.get("OPENAI_API_KEY"):
+            log.info("Neither OPENAI_API_KEY nor Ollama key found — MemStore disabled "
                      "(mem0 needs an embedder)")
             self._available = False
             return False
@@ -191,6 +200,19 @@ class MemStore:
         return self.search(query, limit=8)
 
     # ─── helpers ───
+
+    def _load_ollama_key(self) -> str | None:
+        """Read Ollama API key from project's keys.json."""
+        try:
+            from .agent import load_keys
+            keys = load_keys(self.project_root)
+            if isinstance(keys, dict):
+                k = keys.get("ollama")
+                if isinstance(k, str) and k.strip():
+                    return k.strip()
+        except Exception:
+            pass
+        return None
 
     def _ensure_openai_key(self) -> None:
         """Pull OPENAI_API_KEY from the project's keys.json if not in env."""

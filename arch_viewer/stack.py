@@ -131,10 +131,48 @@ def _compose_up(compose_dir: Path, services: list[str]) -> None:
         )
 
 
+def _detect_neo4j_credentials() -> tuple[str, str] | None:
+    """
+    Inspect any running container exposing port 7687 and try to read its
+    NEO4J_AUTH env var. Returns (user, password) or None.
+    """
+    docker = _which("docker")
+    if not docker:
+        return None
+    try:
+        # Find containers exposing 7687
+        r = subprocess.run(
+            [docker, "ps", "--filter", "publish=7687", "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0:
+            return None
+        for name in r.stdout.strip().splitlines():
+            name = name.strip()
+            if not name:
+                continue
+            r2 = subprocess.run(
+                [docker, "inspect", name, "--format", "{{range .Config.Env}}{{println .}}{{end}}"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in r2.stdout.splitlines():
+                if line.startswith("NEO4J_AUTH="):
+                    auth = line.split("=", 1)[1]
+                    if "/" in auth:
+                        u, p = auth.split("/", 1)
+                        return u, p
+    except Exception as e:
+        log.warning("Failed to detect Neo4j credentials: %s", e)
+    return None
+
+
 def bootstrap_stack(compose_dir: Path | None = None) -> None:
     """
     Ensure Neo4j and Qdrant are running. Auto-starts Docker Desktop on Windows
     if needed. Raises StackError on failure — no flat-file fallback.
+
+    Also auto-detects credentials of any existing Neo4j container so we can
+    share infrastructure with other apps (e.g., sales-coach's coach-neo4j).
 
     compose_dir: directory containing docker-compose.yml. If None, uses the
                  arch-viewer install dir.
@@ -158,6 +196,17 @@ def bootstrap_stack(compose_dir: Path | None = None) -> None:
     qdrant_up = _http_ok(QDRANT_HEALTH_URL)
     if neo4j_up and qdrant_up:
         log.info("Neo4j and Qdrant already running — skipping compose up.")
+        # Detect existing Neo4j credentials so arch-viewer can connect to a
+        # shared instance (e.g., the coach-neo4j container from sales-coach).
+        creds = _detect_neo4j_credentials()
+        if creds:
+            import os
+            user, password = creds
+            if not os.environ.get("NEO4J_USER"):
+                os.environ["NEO4J_USER"] = user
+            if not os.environ.get("NEO4J_PASSWORD"):
+                os.environ["NEO4J_PASSWORD"] = password
+            log.info("Detected Neo4j credentials from existing container — user=%s", user)
         return
 
     # 3. Compose up missing services
