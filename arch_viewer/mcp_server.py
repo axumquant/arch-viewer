@@ -34,6 +34,12 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from .agent import ArchitectureAgent
+from .memory import (
+    add_correction,
+    add_pattern,
+    get_analysis_history,
+    load_memory,
+)
 from .models import Architecture
 from .scanner import scan_project
 from .watcher import ChangeEvent, ProjectWatcher
@@ -245,6 +251,65 @@ class ArchViewerMCP:
                         "required": ["path"],
                     },
                 ),
+                Tool(
+                    name="get_memory",
+                    description=(
+                        "Returns all learned patterns, user corrections, component notes, "
+                        "and analysis history from the AI memory store. The AI remembers "
+                        "architectural insights across sessions to provide better analysis."
+                    ),
+                    inputSchema={"type": "object", "properties": {}, "required": []},
+                ),
+                Tool(
+                    name="add_memory_pattern",
+                    description=(
+                        "Teach the AI a new architecture pattern about this project. "
+                        "The pattern is stored locally and used in future analyses. "
+                        "Categories: architecture, design-pattern, anti-pattern, relationship, technology."
+                    ),
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "category": {
+                                "type": "string",
+                                "description": (
+                                    "Pattern category: architecture, design-pattern, "
+                                    "anti-pattern, relationship, or technology"
+                                ),
+                            },
+                            "description": {
+                                "type": "string",
+                                "description": "What the pattern is (e.g., 'Uses event-driven architecture with FastAPI WebSockets')",
+                            },
+                            "confidence": {
+                                "type": "number",
+                                "description": "Confidence score 0.0-1.0 (default: 0.8)",
+                            },
+                        },
+                        "required": ["category", "description"],
+                    },
+                ),
+                Tool(
+                    name="add_memory_correction",
+                    description=(
+                        "Correct something the AI got wrong. The correction is stored and "
+                        "applied in all future analyses so the same mistake isn't repeated."
+                    ),
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "original": {
+                                "type": "string",
+                                "description": "What the AI originally said or concluded (the wrong thing)",
+                            },
+                            "correction": {
+                                "type": "string",
+                                "description": "What is actually correct",
+                            },
+                        },
+                        "required": ["original", "correction"],
+                    },
+                ),
             ]
 
         @server.call_tool()
@@ -419,6 +484,37 @@ class ArchViewerMCP:
                     for e in analysis.exports
                 ],
             }, indent=2)
+
+        elif name == "get_memory":
+            memory = load_memory(self.root)
+            return json.dumps(memory, indent=2, default=str)
+
+        elif name == "add_memory_pattern":
+            category = args.get("category", "architecture")
+            description = args.get("description", "")
+            confidence = args.get("confidence", 0.8)
+            if not description:
+                return "Error: description is required"
+            entry = add_pattern(
+                self.root, category, description, confidence, source="ai",
+            )
+            return json.dumps({
+                "status": "ok",
+                "message": f"Pattern added [{category}]",
+                "pattern": entry,
+            }, indent=2, default=str)
+
+        elif name == "add_memory_correction":
+            original = args.get("original", "")
+            correction = args.get("correction", "")
+            if not original or not correction:
+                return "Error: both original and correction are required"
+            entry = add_correction(self.root, original, correction)
+            return json.dumps({
+                "status": "ok",
+                "message": "Correction recorded",
+                "correction": entry,
+            }, indent=2, default=str)
 
         else:
             return f"Unknown tool: {name}"

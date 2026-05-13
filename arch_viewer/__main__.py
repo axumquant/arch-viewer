@@ -188,10 +188,12 @@ async def _run_web_only(root, provider, model, port, no_ai):
     # Start web server
     await start_web_server(arch_mcp=mcp, port=port)
 
-    print(f"\n  ⚡ Arch Viewer running at http://localhost:{port}")
-    print(f"  📂 Watching: {root}")
-    print(f"  🤖 Provider: {provider}" + (" (AI disabled)" if no_ai else ""))
-    print()
+    import sys, io
+    out = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    out.write(f"\n  ⚡ Arch Viewer running at http://localhost:{port}\n")
+    out.write(f"  📂 Watching: {root}\n")
+    out.write(f"  🤖 Provider: {provider}" + (" (AI disabled)" if no_ai else "") + "\n\n")
+    out.flush()
 
     # Keep running
     try:

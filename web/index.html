@@ -121,9 +121,34 @@
   #editorView { display: none; flex-direction: column; }
   #editorView.active { display: flex; }
   .ed-info { padding: 6px 14px; font-size: 11px; color: var(--fg2); background: var(--bg2); border-bottom: 1px solid var(--bg4); display: flex; gap: 14px; align-items: center; flex-shrink: 0; }
-  .ed-info .badge { background: var(--bg4); padding: 2px 8px; border-radius: 4px; font-size: 10px; text-transform: uppercase; }
+  .ed-info .badge { background: var(--bg4); padding: 2px 8px; border-radius: 4px; font-size: 10px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
+  .ed-info .badge.lang-python { background: #3572A5; color: #fff; }
+  .ed-info .badge.lang-javascript,.ed-info .badge.lang-jsx { background: #f1e05a; color: #000; }
+  .ed-info .badge.lang-typescript,.ed-info .badge.lang-tsx { background: #3178c6; color: #fff; }
+  .ed-info .badge.lang-json { background: #a37acc; color: #fff; }
+  .ed-info .badge.lang-html,.ed-info .badge.lang-xml,.ed-info .badge.lang-svg { background: #e34c26; color: #fff; }
+  .ed-info .badge.lang-css,.ed-info .badge.lang-scss { background: #563d7c; color: #fff; }
+  .ed-info .badge.lang-markdown { background: #083fa1; color: #fff; }
+  .ed-info .badge.lang-yaml { background: #cb171e; color: #fff; }
+  .ed-info .badge.lang-sql { background: #e38c00; color: #fff; }
+  .ed-info .badge.lang-shell { background: #89e051; color: #000; }
+  .ed-info .badge.lang-toml { background: #9c4221; color: #fff; }
+  .ed-info .badge.lang-rust { background: #dea584; color: #000; }
+  .ed-info .badge.lang-go { background: #00ADD8; color: #fff; }
   .save-btn { margin-left: auto; padding: 4px 12px; background: var(--green); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; opacity: 0; transition: 0.2s; }
   .save-btn.show { opacity: 1; }
+  /* CodeMirror 6 host */
+  .cm-host { flex: 1; overflow: hidden; }
+  .cm-host .cm-editor { height: 100%; }
+  .cm-host .cm-editor.cm-focused { outline: none; }
+  .cm-host .cm-scroller { overflow: auto !important; font-family: var(--mono) !important; font-size: 13px !important; line-height: 1.6 !important; }
+  .cm-host .cm-gutters { border-right: 1px solid var(--bg4) !important; }
+  .cm-host .cm-activeLineGutter { background: rgba(22,27,34,0.6) !important; }
+  .cm-host .cm-activeLine { background: rgba(22,27,34,0.5) !important; }
+  .cm-host .cm-cursor { border-left-color: var(--accent) !important; }
+  .cm-host .cm-selectionBackground { background: rgba(56,139,253,0.2) !important; }
+  .cm-host .cm-matchingBracket { background: rgba(46,160,67,0.2) !important; outline: 1px solid rgba(46,160,67,0.4); }
+  /* Textarea fallback (when CodeMirror fails to load) */
   .ed-wrap { flex: 1; display: flex; overflow: auto; }
   .ed-nums { padding: 10px 0 10px 10px; font-family: var(--mono); font-size: 13px; line-height: 1.6; color: var(--fg3); text-align: right; user-select: none; border-right: 1px solid var(--bg4); min-width: 44px; }
   .ed-area { flex: 1; background: var(--bg); color: var(--fg); border: none; outline: none; padding: 10px; font-family: var(--mono); font-size: 13px; line-height: 1.6; tab-size: 4; resize: none; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
@@ -264,6 +289,59 @@ const COMP_ICONS = {
   docker:"🐳", ci_cd:"⚡", config:"🤖", cache:"📦",
   auth:"🔐", worker:"⚙️", mcp_server:"🔌", other:"📁",
 };
+
+// ─── CodeMirror 6 (async CDN load) ───
+let cmView = null;
+let cmReady = false;
+(async () => {
+  try {
+    const CDN = "https://esm.sh";
+    const [cm, cmState, cmView, cmCmds, cmTheme, pyM, jsM, jsonM, htmlM, cssM, mdM, sqlM, yamlM] = await Promise.all([
+      import(CDN+"/codemirror"),
+      import(CDN+"/@codemirror/state"),
+      import(CDN+"/@codemirror/view"),
+      import(CDN+"/@codemirror/commands"),
+      import(CDN+"/@codemirror/theme-one-dark"),
+      import(CDN+"/@codemirror/lang-python"),
+      import(CDN+"/@codemirror/lang-javascript"),
+      import(CDN+"/@codemirror/lang-json"),
+      import(CDN+"/@codemirror/lang-html"),
+      import(CDN+"/@codemirror/lang-css"),
+      import(CDN+"/@codemirror/lang-markdown"),
+      import(CDN+"/@codemirror/lang-sql"),
+      import(CDN+"/@codemirror/lang-yaml"),
+    ]);
+    window._CM = {
+      EditorView: cm.EditorView, EditorState: cmState.EditorState,
+      basicSetup: cm.basicSetup, keymap: cmView.keymap,
+      indentWithTab: cmCmds.indentWithTab,
+      oneDark: cmTheme.oneDark,
+      langs: { python:pyM.python, javascript:jsM.javascript, json:jsonM.json,
+               html:htmlM.html, css:cssM.css, markdown:mdM.markdown,
+               sql:sqlM.sql, yaml:yamlM.yaml }
+    };
+    cmReady = true;
+    console.log("✓ CodeMirror 6 loaded with syntax highlighting");
+    if (S.view === "editor" && S.activeTab) renderEditor();
+  } catch (e) { console.warn("CodeMirror load failed, using textarea fallback:", e); }
+})();
+
+function destroyCM() { if (cmView) { cmView.destroy(); cmView = null; } }
+
+function getCMLang(lang) {
+  const L = window._CM?.langs;
+  if (!L) return null;
+  if (lang==="python") return L.python();
+  if (lang==="javascript"||lang==="jsx") return L.javascript({ jsx:true });
+  if (lang==="typescript"||lang==="tsx") return L.javascript({ typescript:true, jsx:true });
+  if (lang==="json") return L.json();
+  if (lang==="html"||lang==="xml"||lang==="svg"||lang==="vue") return L.html();
+  if (lang==="css"||lang==="scss"||lang==="less") return L.css();
+  if (lang==="markdown") return L.markdown();
+  if (lang==="sql") return L.sql();
+  if (lang==="yaml") return L.yaml();
+  return null;
+}
 
 // ─── WebSocket ───
 function connectWS() {
@@ -484,21 +562,53 @@ function renderTabs() {
 function renderEditor() {
   const c = document.getElementById("editorView");
   const tab = S.openTabs.find(t=>t.path===S.activeTab);
-  if (!tab) { c.innerHTML='<div style="padding:40px;text-align:center;color:var(--fg3)">Select a file</div>'; return; }
-  const lines = (tab.content||"").split("\n");
-  const nums = lines.map((_,i)=>i+1).join("\n");
+  if (!tab) { destroyCM(); c.innerHTML='<div style="padding:40px;text-align:center;color:var(--fg3)">Select a file</div>'; return; }
   const dirty = S.dirty.has(tab.path);
-  c.innerHTML = `<div class="ed-info"><span class="badge">${tab.lang||"text"}</span><span>${tab.path}</span>
+  const lang = tab.lang||"text";
+  const infoBar = `<div class="ed-info"><span class="badge lang-${lang}">${lang}</span><span>${tab.path}</span>
     <span>${fmtB(new Blob([tab.content||""]).size)}</span>
-    <button class="save-btn ${dirty?"show":""}" id="saveBtn">Save ⌘S</button></div>
-    <div class="ed-wrap"><pre class="ed-nums">${nums}</pre>
-    <textarea id="codeArea" spellcheck="false" class="ed-area">${esc(tab.content||"")}</textarea></div>`;
-  const ta = document.getElementById("codeArea");
-  ta.addEventListener("input", () => { tab.content=ta.value; S.dirty.add(tab.path); renderTabs(); document.getElementById("saveBtn")?.classList.add("show"); });
-  ta.addEventListener("keydown", (e) => {
-    if(e.key==="Tab"){e.preventDefault();const s=ta.selectionStart,en=ta.selectionEnd;ta.value=ta.value.substring(0,s)+"  "+ta.value.substring(en);ta.selectionStart=ta.selectionEnd=s+2;tab.content=ta.value;S.dirty.add(tab.path);}
-    if((e.ctrlKey||e.metaKey)&&e.key==="s"){e.preventDefault();saveCurrent();}
-  });
+    <button class="save-btn ${dirty?"show":""}" id="saveBtn">Save ⌘S</button></div>`;
+
+  if (cmReady && window._CM) {
+    // ── CodeMirror 6 mode ──
+    destroyCM();
+    c.innerHTML = infoBar + '<div id="cmHost" class="cm-host"></div>';
+    const langExt = getCMLang(lang);
+    const exts = [
+      window._CM.basicSetup,
+      window._CM.oneDark,
+      window._CM.keymap.of([
+        window._CM.indentWithTab,
+        { key:"Mod-s", run:()=>{ saveCurrent(); return true; } }
+      ]),
+      window._CM.EditorView.updateListener.of(u => {
+        if (u.docChanged) {
+          tab.content = u.state.doc.toString();
+          S.dirty.add(tab.path);
+          renderTabs();
+          document.getElementById("saveBtn")?.classList.add("show");
+        }
+      }),
+    ];
+    if (langExt) exts.push(langExt);
+    cmView = new window._CM.EditorView({
+      state: window._CM.EditorState.create({ doc: tab.content||"", extensions: exts }),
+      parent: document.getElementById("cmHost"),
+    });
+  } else {
+    // ── Textarea fallback ──
+    destroyCM();
+    const lines = (tab.content||"").split("\n");
+    const nums = lines.map((_,i)=>i+1).join("\n");
+    c.innerHTML = infoBar + `<div class="ed-wrap"><pre class="ed-nums">${nums}</pre>
+      <textarea id="codeArea" spellcheck="false" class="ed-area">${esc(tab.content||"")}</textarea></div>`;
+    const ta = document.getElementById("codeArea");
+    ta.addEventListener("input", () => { tab.content=ta.value; S.dirty.add(tab.path); renderTabs(); document.getElementById("saveBtn")?.classList.add("show"); });
+    ta.addEventListener("keydown", (e) => {
+      if(e.key==="Tab"){e.preventDefault();const s=ta.selectionStart,en=ta.selectionEnd;ta.value=ta.value.substring(0,s)+"  "+ta.value.substring(en);ta.selectionStart=ta.selectionEnd=s+2;tab.content=ta.value;S.dirty.add(tab.path);}
+      if((e.ctrlKey||e.metaKey)&&e.key==="s"){e.preventDefault();saveCurrent();}
+    });
+  }
   document.getElementById("saveBtn").onclick = saveCurrent;
 }
 
@@ -532,7 +642,7 @@ function saveCurrent() { const t=S.openTabs.find(t=>t.path===S.activeTab); if(t)
 function fmtB(b) { if(!b) return "0 B"; const k=1024,s=["B","KB","MB","GB"],i=Math.floor(Math.log(b)/Math.log(k)); return parseFloat((b/Math.pow(k,i)).toFixed(1))+" "+s[i]; }
 function esc(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function fileIcon(c) { return {backend:"🐍",frontend:"⚛️",config:"⚙️",style:"🎨",template:"📄",data:"🗄️",docs:"📝",docker:"🐳",ci:"⚡",shell:"💻",extension:"🧩",other:"📄"}[c]||"📄"; }
-function guessLang(p) { const e=p.split(".").pop()?.toLowerCase(); return {py:"python",js:"javascript",ts:"typescript",tsx:"typescript",jsx:"javascript",json:"json",yaml:"yaml",yml:"yaml",md:"markdown",html:"html",css:"css",sql:"sql",sh:"shell",toml:"toml"}[e]||"text"; }
+function guessLang(p) { const e=p.split(".").pop()?.toLowerCase(); return {py:"python",pyw:"python",pyi:"python",js:"javascript",mjs:"javascript",cjs:"javascript",ts:"typescript",tsx:"tsx",jsx:"jsx",json:"json",jsonc:"json",yaml:"yaml",yml:"yaml",md:"markdown",mdx:"markdown",html:"html",htm:"html",xml:"xml",svg:"svg",vue:"html",css:"css",scss:"scss",less:"less",sql:"sql",sh:"shell",bash:"shell",zsh:"shell",fish:"shell",toml:"toml",rs:"rust",go:"go",rb:"ruby",php:"php",java:"java",c:"c",cpp:"cpp",h:"c",hpp:"cpp",cs:"csharp",swift:"swift",kt:"kotlin",r:"r",Rmd:"markdown",dockerfile:"shell",makefile:"shell",gitignore:"text",env:"shell"}[e]||"text"; }
 function mdToHtml(md) {
   return md.replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>")
     .replace(/^- (.+)$/gm,"<li>$1</li>")

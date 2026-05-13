@@ -492,6 +492,15 @@ class ArchitectureAgent:
                 except Exception:
                     pass
 
+        # Inject AI memory context (learned patterns, corrections, history)
+        try:
+            from .memory import get_context_for_analysis
+            memory_ctx = get_context_for_analysis(root)
+            if memory_ctx:
+                lines.append(memory_ctx)
+        except Exception as exc:
+            log.debug("Could not load memory context: %s", exc)
+
         return "\n".join(lines)
 
     async def analyze_single_file(self, file_path: str, content: str) -> str:
