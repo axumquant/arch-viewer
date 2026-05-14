@@ -320,30 +320,10 @@
       <div class="pane" id="diagramView">
         <div class="diag-toolbar">
           <span style="color:var(--fg);font-weight:600">Interactive Architecture</span>
-          <label style="display:flex;align-items:center;gap:4px;color:var(--fg2);cursor:pointer">
-            <input type="checkbox" id="diagramFlows" checked style="accent-color:var(--accent)"/> Flow Animation
-          </label>
-          <button onclick="resetDiagramView()">Reset View</button>
+          <button onclick="loadRichDiagram()">↻ Reload Diagram</button>
           <span class="hint">Scroll to zoom · Drag to pan · Click nodes for details</span>
         </div>
-        <div id="diagramCanvas">
-          <div id="diagramWorld">
-            <svg class="dg-edges" id="dgEdgeSvg" width="2400" height="1200"></svg>
-          </div>
-          <div id="diagramDetail">
-            <button class="dd-close" onclick="closeDiagramDetail()">&times;</button>
-            <h3 id="ddTitle"></h3>
-            <span class="dd-tag" id="ddTag"></span>
-            <p class="dd-desc" id="ddDesc"></p>
-            <h4>Path</h4>
-            <p><code id="ddPath"></code></p>
-            <h4>Tech Stack</h4>
-            <p id="ddTech" style="font-size:12px;color:var(--fg2)"></p>
-            <h4>Connections</h4>
-            <ul id="ddConns"></ul>
-          </div>
-        </div>
-        <div class="diag-legend" id="diagramLegend"></div>
+        <iframe id="diagramFrame" src="about:blank" style="flex:1;border:none;width:100%;height:100%;background:var(--bg)"></iframe>
       </div>
       <div class="pane" id="graphView">
         <div class="diag-toolbar">
@@ -753,7 +733,7 @@ function renderVB() {
   document.getElementById("memoryView").classList.toggle("active", S.view==="memory");
   document.getElementById("editorView").classList.toggle("active", S.view==="editor");
   document.getElementById("activityView").classList.toggle("active", S.view==="activity");
-  if (S.view==="diagram") renderDiagram();
+  if (S.view==="diagram") loadRichDiagram();
   if (S.view==="graph") refreshGraph();
   if (S.view==="memory") refreshMemory();
 }
@@ -859,298 +839,20 @@ async function refreshMemory() {
   }
 }
 
-// ─── Interactive Architecture Diagram (HTML/SVG — no library) ───
-const ZONE_COLORS = {
-  backend:"#3fb950", frontend:"#58a6ff", extension:"#f778ba", database:"#a371f7",
-  docker:"#2ea9df", ci_cd:"#d18616", config:"#d29922", cache:"#79c0ff",
-  auth:"#d29922", worker:"#bc8cff", mcp_server:"#58a6ff", other:"#8b949e",
-};
-const ZONE_LABELS = {
-  backend:"Backend", frontend:"Frontend", extension:"Extension", database:"Database",
-  docker:"Docker", ci_cd:"CI/CD", config:"Config", cache:"Cache",
-  auth:"Auth", worker:"Worker", mcp_server:"MCP Server", other:"Other",
-};
-const EDGE_COLORS = { HTTP:"#58a6ff", REST:"#58a6ff", WebSocket:"#f778ba", ws:"#f778ba", gRPC:"#bc8cff", import:"#484f58", dep:"#30363d" };
-let dgNodeEls = {};
-let dgSelected = null;
-let dgZoom = 1, dgPanX = 0, dgPanY = 0;
-let dgDragging = false, dgDragStartX = 0, dgDragStartY = 0;
+// ─── Interactive Architecture Diagram (rich iframe from /api/diagram/html) ───
+let _diagramLoaded = false;
 
-function renderDiagram() {
-  const wrap = document.getElementById("diagramCanvas");
-  const world = document.getElementById("diagramWorld");
-  const svg = document.getElementById("dgEdgeSvg");
-  if (!wrap || !world) return;
-
-  if (!S.arch) {
-    world.innerHTML = '<svg class="dg-edges" id="dgEdgeSvg" width="2400" height="1200"></svg>';
-    world.innerHTML += '<div style="padding:60px;text-align:center;color:var(--fg3);font-size:13px">Scanning project...</div>';
-    return;
-  }
-
-  const comps = S.arch.components || [];
-  const flows = S.arch.data_flows || [];
-  const deps = S.arch.dependencies || [];
-
-  if (comps.length === 0) {
-    world.innerHTML = '<svg class="dg-edges" id="dgEdgeSvg" width="2400" height="1200"></svg>';
-    world.innerHTML += '<div style="padding:60px;text-align:center;color:var(--fg3);font-size:13px">No components detected. Click Refresh for AI analysis.</div>';
-    return;
-  }
-
-  // Clear previous nodes (keep SVG)
-  world.querySelectorAll(".dg-node, .dg-layer-label").forEach(el => el.remove());
-  dgNodeEls = {};
-  dgSelected = null;
-  closeDiagramDetail();
-
-  // ─── Layout: group components by type into columns ───
-  const groups = {};
-  comps.forEach(comp => {
-    const t = comp.type || "other";
-    if (!groups[t]) groups[t] = [];
-    groups[t].push(comp);
-  });
-  const groupKeys = Object.keys(groups);
-  const colWidth = 220;
-  const rowHeight = 80;
-  const padX = 60;
-  const padY = 80;
-
-  // Place nodes column-by-column
-  const positions = {};
-  groupKeys.forEach((type, col) => {
-    const items = groups[type];
-    // Layer label
-    const lbl = document.createElement("div");
-    lbl.className = "dg-layer-label";
-    lbl.style.left = (padX + col * colWidth) + "px";
-    lbl.style.top = "30px";
-    lbl.textContent = ZONE_LABELS[type] || type;
-    world.appendChild(lbl);
-
-    items.forEach((comp, row) => {
-      const x = padX + col * colWidth;
-      const y = padY + row * rowHeight;
-      positions[comp.name] = { x, y };
-
-      const el = document.createElement("div");
-      el.className = "dg-node tier-" + (comp.type || "other");
-      el.style.left = x + "px";
-      el.style.top = y + "px";
-      const icon = COMP_ICONS[comp.type] || "📁";
-      const tech = (comp.tech_stack || []).slice(0, 2).join(", ");
-      el.innerHTML = `<div class="dg-label">${icon} ${comp.name}</div><div class="dg-sub">${tech || comp.type || ""}</div>`;
-      el.addEventListener("click", e => { e.stopPropagation(); selectDiagramNode(comp.name); });
-      world.appendChild(el);
-      dgNodeEls[comp.name] = el;
-    });
-  });
-
-  // Size the SVG to cover all nodes
-  const maxX = Math.max(...Object.values(positions).map(p => p.x)) + colWidth + 60;
-  const maxY = Math.max(...Object.values(positions).map(p => p.y)) + rowHeight + 60;
-  svg.setAttribute("width", maxX);
-  svg.setAttribute("height", maxY);
-
-  // ─── Draw edges after nodes render (need dimensions) ───
-  requestAnimationFrame(() => {
-    buildDiagramEdges(positions, flows, deps);
-    resetDiagramView();
-  });
-
-  // ─── Legend ───
-  const types = [...new Set(comps.map(c => c.type || "other"))];
-  let legHtml = '<h4>Component Types</h4>';
-  for (const t of types) {
-    const c = ZONE_COLORS[t] || ZONE_COLORS.other;
-    legHtml += `<div class="leg-row"><div class="leg-dot" style="background:${c}"></div>${ZONE_LABELS[t] || t}</div>`;
-  }
-  if (flows.length > 0) {
-    legHtml += '<h4 style="margin-top:8px">Data Flows</h4>';
-    const protocols = [...new Set(flows.map(f => f.protocol || "unknown"))];
-    for (const p of protocols) {
-      const dash = p === "WebSocket" || p === "ws" ? "dashed" : "solid";
-      legHtml += `<div class="leg-row"><div style="width:20px;border-top:2px ${dash} ${EDGE_COLORS[p]||"#8b949e"};margin-right:2px"></div>${p}</div>`;
-    }
-  }
-  document.getElementById("diagramLegend").innerHTML = legHtml;
-}
-
-function nodeCenter(id) {
-  const el = dgNodeEls[id];
-  if (!el) return null;
-  return { x: parseInt(el.style.left) + el.offsetWidth / 2, y: parseInt(el.style.top) + el.offsetHeight / 2 };
-}
-
-function buildDiagramEdges(positions, flows, deps) {
-  const svg = document.getElementById("dgEdgeSvg");
-  if (!svg) return;
-  svg.innerHTML = "";
-  const animate = document.getElementById("diagramFlows")?.checked ?? true;
-
-  // Data flow edges
-  flows.forEach(f => {
-    const a = nodeCenter(f.source);
-    const b = nodeCenter(f.target);
-    if (!a || !b) return;
-    const color = EDGE_COLORS[f.protocol] || "#484f58";
-    drawBezierEdge(svg, a, b, color, animate);
-  });
-
-  // Dependency edges (subtle dotted)
-  const flowPairs = new Set(flows.map(f => f.source + "→" + f.target));
-  deps.forEach(d => {
-    if (flowPairs.has(d.from + "→" + d.to)) return;
-    const a = nodeCenter(d.from);
-    const b = nodeCenter(d.to);
-    if (!a || !b) return;
-    drawBezierEdge(svg, a, b, "#30363d", false, true);
-  });
-}
-
-function drawBezierEdge(svg, a, b, color, animate, dotted) {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const cx1 = a.x + dx * 0.4;
-  const cy1 = a.y;
-  const cx2 = b.x - dx * 0.4;
-  const cy2 = b.y;
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", `M${a.x},${a.y} C${cx1},${cy1} ${cx2},${cy2} ${b.x},${b.y}`);
-  path.setAttribute("stroke", color);
-  let cls = "dg-edge";
-  if (animate) cls += " dg-edge-anim";
-  path.setAttribute("class", cls);
-  if (dotted) { path.style.strokeDasharray = "3 6"; path.style.opacity = "0.25"; }
-  svg.appendChild(path);
-}
-
-function selectDiagramNode(id) {
-  const comp = (S.arch?.components || []).find(c => c.name === id);
-  if (!comp) return;
-
-  // Un-select previous
-  Object.values(dgNodeEls).forEach(el => el.classList.remove("selected"));
-  if (dgNodeEls[id]) dgNodeEls[id].classList.add("selected");
-  dgSelected = id;
-
-  // Fill detail panel
-  const color = ZONE_COLORS[comp.type] || ZONE_COLORS.other;
-  document.getElementById("ddTitle").textContent = (COMP_ICONS[comp.type] || "📁") + " " + comp.name;
-  const tag = document.getElementById("ddTag");
-  tag.textContent = ZONE_LABELS[comp.type] || comp.type || "Other";
-  tag.style.background = color;
-  tag.style.color = "#fff";
-  document.getElementById("ddDesc").textContent = comp.description || "No description available.";
-  document.getElementById("ddPath").textContent = comp.path || ".";
-  document.getElementById("ddTech").textContent = (comp.tech_stack || []).join(", ") || "—";
-
-  // Connections
-  const flows = S.arch?.data_flows || [];
-  const deps = S.arch?.dependencies || [];
-  const outFlow = flows.filter(f => f.source === id).map(f => f.target);
-  const inFlow = flows.filter(f => f.target === id).map(f => f.source);
-  const outDep = deps.filter(d => d.from === id).map(d => d.to);
-  const inDep = deps.filter(d => d.to === id).map(d => d.from);
-  const all = [...new Set([...outFlow, ...inFlow, ...outDep, ...inDep])];
-  const ul = document.getElementById("ddConns");
-  ul.innerHTML = "";
-  if (all.length === 0) {
-    ul.innerHTML = '<li style="color:var(--fg3)">No connections</li>';
-  } else {
-    all.forEach(cid => {
-      const li = document.createElement("li");
-      const arrow = outFlow.includes(cid) ? (inFlow.includes(cid) ? "↔" : "→") : "←";
-      li.textContent = arrow + " " + cid;
-      li.style.cursor = "pointer";
-      li.addEventListener("click", () => selectDiagramNode(cid));
-      ul.appendChild(li);
-    });
-  }
-
-  document.getElementById("diagramDetail").classList.add("open");
-
-  // Also filter the file tree
-  if (comp.path) {
-    document.getElementById("treeFilter").value = comp.path;
-    renderTree();
+function loadRichDiagram() {
+  const frame = document.getElementById("diagramFrame");
+  if (!frame) return;
+  if (!_diagramLoaded || frame.src === "about:blank") {
+    frame.src = "/api/diagram/html";
+    _diagramLoaded = true;
   }
 }
 
-function closeDiagramDetail() {
-  document.getElementById("diagramDetail")?.classList.remove("open");
-  Object.values(dgNodeEls).forEach(el => el.classList.remove("selected"));
-  dgSelected = null;
-}
-
-// ─── Pan / Zoom ───
-function applyDiagramTransform() {
-  const world = document.getElementById("diagramWorld");
-  if (world) world.style.transform = `translate(${dgPanX}px,${dgPanY}px) scale(${dgZoom})`;
-}
-
-function resetDiagramView() {
-  const wrap = document.getElementById("diagramCanvas");
-  const world = document.getElementById("diagramWorld");
-  if (!wrap || !world) return;
-  const ww = wrap.offsetWidth;
-  const wh = wrap.offsetHeight;
-  // Fit to content
-  const svgEl = document.getElementById("dgEdgeSvg");
-  const cw = parseInt(svgEl?.getAttribute("width") || "800");
-  const ch = parseInt(svgEl?.getAttribute("height") || "600");
-  dgZoom = Math.min(ww / (cw + 40), wh / (ch + 40), 1.2);
-  dgZoom = Math.max(dgZoom, 0.3);
-  dgPanX = (ww - cw * dgZoom) / 2;
-  dgPanY = (wh - ch * dgZoom) / 2;
-  applyDiagramTransform();
-}
-
-// Wire up pan/zoom on the canvas
-(function() {
-  const wrap = document.getElementById("diagramCanvas");
-  if (!wrap) return;
-
-  wrap.addEventListener("mousedown", e => {
-    if (e.target.closest(".dg-node") || e.target.closest("#diagramDetail")) return;
-    dgDragging = true;
-    dgDragStartX = e.clientX - dgPanX;
-    dgDragStartY = e.clientY - dgPanY;
-    wrap.classList.add("grabbing");
-    closeDiagramDetail();
-  });
-  window.addEventListener("mousemove", e => {
-    if (!dgDragging) return;
-    dgPanX = e.clientX - dgDragStartX;
-    dgPanY = e.clientY - dgDragStartY;
-    applyDiagramTransform();
-  });
-  window.addEventListener("mouseup", () => {
-    dgDragging = false;
-    wrap.classList.remove("grabbing");
-  });
-  wrap.addEventListener("wheel", e => {
-    if (S.view !== "diagram") return;
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    const rect = wrap.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const newZ = Math.max(0.2, Math.min(3, dgZoom * delta));
-    dgPanX = mx - (mx - dgPanX) * (newZ / dgZoom);
-    dgPanY = my - (my - dgPanY) * (newZ / dgZoom);
-    dgZoom = newZ;
-    applyDiagramTransform();
-  }, { passive: false });
-})();
-
-// Wire up flow animation toggle
-document.getElementById("diagramFlows")?.addEventListener("change", () => {
-  if (S.view !== "diagram") return;
-  const animate = document.getElementById("diagramFlows").checked;
-  document.querySelectorAll(".dg-edge").forEach(p => p.classList.toggle("dg-edge-anim", animate));
-});
+// Diagram reload on navigate
+function resetDiagramView() { loadRichDiagram(); }
 
 // ─── Actions ───
 function openFile(p) { reqFile(p); }
@@ -1171,7 +873,7 @@ function mdToHtml(md) {
 }
 
 // ─── Events ───
-document.querySelectorAll(".vb").forEach(b => b.onclick = () => { S.view=b.dataset.v; renderVB(); if(S.view==="editor")renderEditor(); if(S.view==="diagram")renderDiagram(); });
+document.querySelectorAll(".vb").forEach(b => b.onclick = () => { S.view=b.dataset.v; renderVB(); if(S.view==="editor")renderEditor(); if(S.view==="diagram")loadRichDiagram(); });
 document.getElementById("treeFilter").addEventListener("input", renderTree);
 document.getElementById("showHiddenToggle").addEventListener("change", renderTree);
 document.getElementById("refreshBtn").onclick = () => { S.ws?.send(JSON.stringify({type:"refresh_ai"})); document.getElementById("refreshBtn").textContent="↻ Analyzing..."; setTimeout(()=>document.getElementById("refreshBtn").textContent="↻ Refresh", 30000); };

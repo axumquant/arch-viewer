@@ -69,20 +69,20 @@ PROVIDERS: dict[str, dict] = {
     "ollama": {
         "display": "Ollama Cloud",
         "env_var": "OLLAMA_API_KEY",
-        "base_url": "https://api.ollama.com/v1",
+        "base_url": "https://ollama.com/v1",
         "models": [
-            {"id": "qwen3-coder:480b-cloud", "name": "Qwen3 Coder 480B", "recommended": True,
+            {"id": "qwen3-coder:480b", "name": "Qwen3 Coder 480B", "recommended": True,
              "description": "Best for code analysis and architecture review"},
-            {"id": "gpt-oss:120b-cloud", "name": "GPT-OSS 120B", "recommended": False,
+            {"id": "gpt-oss:120b", "name": "GPT-OSS 120B", "recommended": False,
              "description": "Strong general-purpose model"},
-            {"id": "gpt-oss:20b-cloud", "name": "GPT-OSS 20B", "recommended": False,
+            {"id": "gpt-oss:20b", "name": "GPT-OSS 20B", "recommended": False,
              "description": "Fast and lightweight"},
-            {"id": "deepseek-v3.1:671b-cloud", "name": "DeepSeek V3.1 671B", "recommended": False,
+            {"id": "deepseek-v3.1:671b", "name": "DeepSeek V3.1 671B", "recommended": False,
              "description": "Largest, most capable reasoning model"},
-            {"id": "kimi-k2:1t-cloud", "name": "Kimi K2 1T", "recommended": False,
+            {"id": "kimi-k2:1t", "name": "Kimi K2 1T", "recommended": False,
              "description": "1 trillion parameter model"},
         ],
-        "default_model": "qwen3-coder:480b-cloud",
+        "default_model": "qwen3-coder:480b",
     },
     "openai": {
         "display": "OpenAI",
@@ -391,7 +391,7 @@ class ArchitectureAgent:
 
         except Exception as e:
             log.warning("Failed to generate summary: %s", e)
-            arch.ai_summary = "(AI analysis unavailable — check API key in .arch-viewer.keys.json)"
+            arch.ai_summary = f"(AI analysis failed: {e}. Check provider/model in ⚙ Keys settings.)"
 
         arch.analysis_version += 1
 
