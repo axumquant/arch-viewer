@@ -36,7 +36,8 @@
   .main { display: flex; flex: 1; overflow: hidden; }
 
   /* Sidebar */
-  .sidebar { width: 260px; min-width: 180px; background: var(--bg2); border-right: 1px solid var(--bg4); display: flex; flex-direction: column; overflow: hidden; }
+  .sidebar { width: 260px; min-width: 0; background: var(--bg2); border-right: 1px solid var(--bg4); display: flex; flex-direction: column; overflow: hidden; transition: width 0.2s ease; position: relative; }
+  .sidebar.collapsed { width: 0; border-right-color: transparent; }
   .sidebar-hdr { padding: 10px 12px; border-bottom: 1px solid var(--bg4); flex-shrink: 0; }
   .sidebar-hdr input[type="text"], .sidebar-hdr input#treeFilter { width: 100%; background: var(--bg3); border: 1px solid var(--bg4); border-radius: 6px; padding: 6px 10px; color: var(--fg); font-size: 12px; outline: none; }
   .sidebar-hdr input[type="text"]:focus, .sidebar-hdr input#treeFilter:focus { border-color: var(--accent); }
@@ -222,7 +223,8 @@
   .act-empty { padding: 40px; text-align: center; color: var(--fg3); }
 
   /* Right panel */
-  .right-panel { width: 280px; background: var(--bg2); border-left: 1px solid var(--bg4); display: flex; flex-direction: column; overflow: hidden; }
+  .right-panel { width: 280px; min-width: 0; background: var(--bg2); border-left: 1px solid var(--bg4); display: flex; flex-direction: column; overflow: hidden; transition: width 0.2s ease; position: relative; }
+  .right-panel.collapsed { width: 0; border-left-color: transparent; }
   .rp-search { padding: 10px; border-bottom: 1px solid var(--bg4); flex-shrink: 0; }
   .rp-search input { width: 100%; background: var(--bg3); border: 1px solid var(--bg4); border-radius: 6px; padding: 7px 10px; color: var(--fg); font-size: 12px; outline: none; }
   .rp-search input:focus { border-color: var(--accent); }
@@ -275,6 +277,19 @@
   .mem-item { background: var(--bg2); border: 1px solid var(--bg4); border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; font-size: 11px; }
   .mem-item .mem-meta { color: var(--fg3); font-size: 10px; margin-top: 4px; }
 
+  /* Sidebar toggle buttons */
+  .panel-toggle {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    width: 16px; height: 48px; z-index: 20;
+    background: var(--bg3); border: 1px solid var(--bg4); cursor: pointer;
+    color: var(--fg3); font-size: 10px; display: flex; align-items: center; justify-content: center;
+    transition: color 0.15s, background 0.15s, opacity 0.15s;
+    padding: 0; line-height: 1;
+  }
+  .panel-toggle:hover { background: var(--bg4); color: var(--fg); }
+  .left-toggle { right: -16px; border-left: none; border-radius: 0 4px 4px 0; }
+  .right-toggle { left: -16px; border-right: none; border-radius: 4px 0 0 4px; }
+
   ::-webkit-scrollbar { width: 7px; height: 7px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 4px; }
@@ -296,7 +311,8 @@
   <div class="conn-dot" id="wsDot" title="WebSocket"></div>
 </div>
 <div class="main">
-  <div class="sidebar">
+  <div class="sidebar" id="leftSidebar">
+    <button class="panel-toggle left-toggle" id="leftToggle" title="Toggle file tree" onclick="togglePanel('left')">◀</button>
     <div class="sidebar-hdr">
       <input id="treeFilter" placeholder="Filter files..."/>
       <label class="show-hidden-toggle" title="Show hidden folders (.arch_viewer, .claude, .github)">
@@ -349,7 +365,8 @@
       <div class="pane" id="activityView"><div class="act-empty">Watching for file changes...</div></div>
     </div>
   </div>
-  <div class="right-panel">
+  <div class="right-panel" id="rightPanel">
+    <button class="panel-toggle right-toggle" id="rightToggle" title="Toggle search panel" onclick="togglePanel('right')">▶</button>
     <div class="rp-search"><input id="searchInput" placeholder="Search across files..."/></div>
     <div class="rp-results" id="searchResults"></div>
   </div>
@@ -926,6 +943,25 @@ function mdToHtml(md) {
     .replace(/^- (.+)$/gm,"<li>$1</li>")
     .replace(/(<li>.*<\/li>)/s, (m) => `<ul>${m}</ul>`)
     .replace(/\n\n/g,"<br><br>").replace(/\n/g,"<br>");
+}
+
+// ─── Panel Toggle ───
+function togglePanel(side) {
+  if (side === 'left') {
+    const el = document.getElementById('leftSidebar');
+    const btn = document.getElementById('leftToggle');
+    const collapsed = el.classList.toggle('collapsed');
+    btn.textContent = collapsed ? '▶' : '◀';
+    btn.title = collapsed ? 'Open file tree' : 'Close file tree';
+    // Move the button to stay visible when sidebar is closed
+    btn.style.right = collapsed ? '-16px' : '-16px';
+  } else {
+    const el = document.getElementById('rightPanel');
+    const btn = document.getElementById('rightToggle');
+    const collapsed = el.classList.toggle('collapsed');
+    btn.textContent = collapsed ? '◀' : '▶';
+    btn.title = collapsed ? 'Open search panel' : 'Close search panel';
+  }
 }
 
 // ─── Events ───
