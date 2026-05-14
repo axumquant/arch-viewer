@@ -51,6 +51,8 @@
   @keyframes flash { 0%{background:rgba(63,185,80,0.3)} 100%{background:transparent} }
   .ti .ic { width: 14px; text-align: center; font-size: 11px; flex-shrink: 0; }
   .ti .nm { overflow: hidden; text-overflow: ellipsis; }
+  .ti .fold-arrow { font-size: 9px; color: var(--fg3); margin-right: 2px; flex-shrink: 0; transition: transform 0.15s; }
+  .ti.folder-open .fold-arrow { transform: rotate(90deg); }
 
   /* Center */
   .center { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -393,7 +395,49 @@
 const S = {
   arch: null, openTabs: [], activeTab: null, view: "arch",
   activities: [], dirty: new Set(), ws: null,
+  openFolders: new Set(),  // tracks which folder paths are expanded
 };
+
+// ─── State persistence ───
+const LS_KEY = "arch-viewer-state";
+function saveState() {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify({
+      view: S.view,
+      activeTab: S.activeTab,
+      openTabPaths: S.openTabs.map(t => t.path),
+      openFolders: [...S.openFolders],
+      leftCollapsed: document.getElementById("leftSidebar")?.classList.contains("collapsed"),
+      rightCollapsed: document.getElementById("rightPanel")?.classList.contains("collapsed"),
+    }));
+  } catch(e) {}
+}
+
+function restoreState(savedPaths) {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return;
+    const d = JSON.parse(raw);
+    if (d.view) { S.view = d.view; }
+    if (d.openFolders) S.openFolders = new Set(d.openFolders);
+    // Re-request open tabs
+    if (d.openTabPaths && S.ws?.readyState === 1) {
+      d.openTabPaths.forEach(p => reqFile(p));
+    }
+    if (d.activeTab) S.activeTab = d.activeTab;
+    // Restore sidebar states
+    if (d.leftCollapsed) {
+      document.getElementById("leftSidebar")?.classList.add("collapsed");
+      const btn = document.getElementById("leftToggle");
+      if (btn) { btn.textContent = "▶"; btn.title = "Open file tree"; }
+    }
+    if (d.rightCollapsed) {
+      document.getElementById("rightPanel")?.classList.add("collapsed");
+      const btn = document.getElementById("rightToggle");
+      if (btn) { btn.textContent = "◀"; btn.title = "Open search panel"; }
+    }
+  } catch(e) {}
+}
 
 const CCOLORS = {
   backend:"#3fb950", frontend:"#58a6ff", config:"#d29922",
@@ -497,6 +541,7 @@ function reqFile(p) { S.ws?.readyState===1 && S.ws.send(JSON.stringify({type:"re
 function saveFile(p,c) { S.ws?.readyState===1 && S.ws.send(JSON.stringify({type:"save_file",path:p,content:c})); }
 
 // ─── Render ───
+let _firstRender = true;
 function renderAll() {
   if (!S.arch) return;
   document.getElementById("projName").textContent = S.arch.project_name || "Project";
@@ -507,7 +552,21 @@ function renderAll() {
   const badge = document.getElementById("aiBadge");
   badge.textContent = S.arch.ai_summary ? "AI ✓" : "AI";
   badge.className = "ai-badge" + (S.arch.ai_summary ? "" : " off");
-  renderTree(); renderArch(); renderTabs(); renderActivity();
+
+  // Restore persisted state on first arch load
+  if (_firstRender) {
+    _firstRender = false;
+    restoreState();
+  }
+
+  renderTree(); renderArch(); renderTabs(); renderActivity(); renderVB();
+
+  // Refresh whichever data pane is active so updates show immediately
+  if (S.view === "graph") refreshGraph();
+  if (S.view === "memory") refreshMemory();
+  if (S.view === "diagram") loadRichDiagram(true);
+
+  saveState();
 }
 
 function renderTree() {
@@ -521,24 +580,40 @@ function renderTree() {
 function walkTree(container, node, depth, filter, prefix) {
   const showHidden = document.getElementById("showHiddenToggle")?.checked ?? true;
   const entries = Object.entries(node).filter(([k]) => k !== "_file").sort(([a,av],[b,bv]) => {
-    const aDir = !av._file, bDir = !bv._file;
+    const aDir = typeof av === "object" && !av._file;
+    const bDir = typeof bv === "object" && !bv._file;
     if (aDir && !bDir) return -1; if (!aDir && bDir) return 1; return a.localeCompare(b);
   });
   for (const [name, val] of entries) {
     const path = prefix ? prefix+"/"+name : name;
-    const isFile = !!val._file;
-    // Hide dot-folders/files unless toggle is on
+    const isFile = !!(val && val._file);
     if (!showHidden && name.startsWith(".")) continue;
     if (filter && isFile && !name.toLowerCase().includes(filter) && !path.toLowerCase().includes(filter)) continue;
+
     const d = document.createElement("div");
-    d.className = "ti" + (S.activeTab===path?" active":"");
+    const isOpen = depth === 0 || S.openFolders.has(path);  // top-level always shown open by default
+    const isDot = name.startsWith(".");
+    d.className = "ti" + (S.activeTab===path?" active":"") + (!isFile && isOpen ? " folder-open" : "");
     d.style.paddingLeft = (12+depth*14)+"px";
     d.dataset.p = path;
-    const isDot = name.startsWith(".");
-    d.innerHTML = `<span class="ic">${isFile ? fileIcon(val._file.category) : "📁"}</span><span class="nm" ${isDot ? 'style="color:var(--fg3)"' : ""}>${name}</span>`;
-    if (isFile) d.onclick = () => openFile(path);
+
+    if (isFile) {
+      d.innerHTML = `<span class="ic">${fileIcon(val._file?.category)}</span><span class="nm" ${isDot?'style="color:var(--fg3)"':""}>${name}</span>`;
+      d.onclick = () => openFile(path);
+    } else {
+      d.innerHTML = `<span class="fold-arrow">▶</span><span class="ic">📁</span><span class="nm" ${isDot?'style="color:var(--fg3)"':""}>${name}</span>`;
+      d.onclick = (e) => {
+        e.stopPropagation();
+        if (S.openFolders.has(path)) S.openFolders.delete(path);
+        else S.openFolders.add(path);
+        saveState();
+        renderTree();
+      };
+    }
+
     container.appendChild(d);
-    if (!isFile) walkTree(container, val, depth+1, filter, path);
+    // Recurse into folders only if open (or filter is active, show all matches)
+    if (!isFile && (isOpen || filter)) walkTree(container, val, depth+1, filter, path);
   }
 }
 
@@ -962,10 +1037,11 @@ function togglePanel(side) {
     btn.textContent = collapsed ? '◀' : '▶';
     btn.title = collapsed ? 'Open search panel' : 'Close search panel';
   }
+  saveState();
 }
 
 // ─── Events ───
-document.querySelectorAll(".vb").forEach(b => b.onclick = () => { S.view=b.dataset.v; renderVB(); if(S.view==="editor")renderEditor(); if(S.view==="diagram")loadRichDiagram(true); });
+document.querySelectorAll(".vb").forEach(b => b.onclick = () => { S.view=b.dataset.v; renderVB(); if(S.view==="editor")renderEditor(); if(S.view==="diagram")loadRichDiagram(true); saveState(); });
 document.getElementById("treeFilter").addEventListener("input", renderTree);
 document.getElementById("showHiddenToggle").addEventListener("change", renderTree);
 document.getElementById("refreshBtn").onclick = () => { S.ws?.send(JSON.stringify({type:"refresh_ai"})); document.getElementById("refreshBtn").textContent="↻ Analyzing..."; setTimeout(()=>document.getElementById("refreshBtn").textContent="↻ Refresh", 30000); };
