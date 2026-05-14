@@ -584,6 +584,7 @@ class ArchViewerMCP:
                     self._arch = await self._agent.analyze_architecture(
                         self._arch, self.root
                     )
+                    # agent.analyze_architecture already calls sync_architecture_to_graph
                     log.info(
                         "AI analysis complete (v%d)", self._arch.analysis_version
                     )
@@ -591,6 +592,15 @@ class ArchViewerMCP:
                     log.warning("AI analysis failed (continuing without): %s", e)
                 finally:
                     self._analyzing = False
+            else:
+                # Structural rescan (no AI) — still push updated graph to Neo4j
+                # so the Neo4j tab reflects file/folder changes in real time.
+                try:
+                    from .memory import sync_architecture_to_graph
+                    sync_architecture_to_graph(self._arch, self.root)
+                    log.debug("Graph synced after structural rescan")
+                except Exception as e:
+                    log.debug("Graph sync after rescan skipped: %s", e)
 
     def _on_file_change(self, event: ChangeEvent):
         """Called by watcher on each file change."""

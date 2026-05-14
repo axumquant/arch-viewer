@@ -30,9 +30,17 @@ def _project_id(project_root: str | Path) -> str:
     return hashlib.sha1(abs_path.encode("utf-8")).hexdigest()[:12]
 
 
+# Passwords tried in order for localhost connections — no env var required.
+_DEFAULT_PASSWORDS = ["archviewer123", "neo4j", "password", "neo4j123", ""]
+
+
 class GraphStore:
     """
     Lazy wrapper around the official `neo4j` Python driver.
+
+    Auto-tries common local Neo4j passwords so you don't need to set
+    NEO4J_PASSWORD for a localhost instance. Pass an explicit password
+    or set NEO4J_PASSWORD to override.
 
     Usage:
         gs = GraphStore(project_root="/path/to/proj")
@@ -52,7 +60,9 @@ class GraphStore:
         self.project_id = _project_id(self.project_root)
         self.uri = uri or os.environ.get("NEO4J_URI", "bolt://localhost:7687")
         self.user = user or os.environ.get("NEO4J_USER", "neo4j")
-        self.password = password or os.environ.get("NEO4J_PASSWORD", "archviewer123")
+        # password=None means "try all defaults"; explicit value skips the loop.
+        self._explicit_password: str | None = password or os.environ.get("NEO4J_PASSWORD")
+        self.password: str = self._explicit_password or _DEFAULT_PASSWORDS[0]
         self._driver: Any = None
         self._available: bool = False
 
@@ -61,6 +71,11 @@ class GraphStore:
     def connect(self) -> bool:
         """
         Open a Neo4j driver and verify connectivity.
+
+        If no explicit password is configured, cycles through _DEFAULT_PASSWORDS
+        until one works — covers fresh Docker installs, custom setups, and
+        passwordless Neo4j Community without requiring any env var.
+
         Returns True on success, False otherwise (silent no-op mode).
         """
         if self._driver is not None:
@@ -74,21 +89,40 @@ class GraphStore:
             self._available = False
             return False
 
-        try:
-            self._driver = GraphDatabase.driver(
-                self.uri, auth=(self.user, self.password)
-            )
-            self._driver.verify_connectivity()
-            self._available = True
-            log.info("Connected to Neo4j at %s (project_id=%s)", self.uri, self.project_id)
-            self._ensure_constraints()
-            return True
-        except Exception as exc:
-            log.warning("Could not connect to Neo4j at %s: %s — graph store disabled",
-                        self.uri, exc)
-            self._driver = None
-            self._available = False
-            return False
+        # Build ordered list of passwords to attempt
+        if self._explicit_password is not None:
+            attempts = [self._explicit_password]
+        else:
+            attempts = list(_DEFAULT_PASSWORDS)
+
+        last_exc: Exception | None = None
+        for pwd in attempts:
+            auth = (self.user, pwd) if pwd else None
+            driver = None
+            try:
+                driver = GraphDatabase.driver(self.uri, auth=auth)
+                driver.verify_connectivity()
+                self._driver = driver
+                self._available = True
+                self.password = pwd
+                log.info("Connected to Neo4j at %s (project_id=%s)", self.uri, self.project_id)
+                self._ensure_constraints()
+                return True
+            except Exception as exc:
+                last_exc = exc
+                if driver is not None:
+                    try:
+                        driver.close()
+                    except Exception:
+                        pass
+
+        log.warning(
+            "Could not connect to Neo4j at %s (tried %d passwords): %s — graph store disabled",
+            self.uri, len(attempts), last_exc,
+        )
+        self._driver = None
+        self._available = False
+        return False
 
     def close(self) -> None:
         if self._driver is not None:
