@@ -556,7 +556,7 @@ async def start_web_server(arch_mcp, port: int = 3777):
 def _start_static_watcher(ws_broadcast):
     """
     Start a background watchdog observer that watches the web/ directory.
-    When any static asset (index.html, JS, CSS, …) is saved, every open
+    When any static asset (index.html, JS, CSS, etc.) is saved, every open
     browser tab receives {type:"reload"} and calls location.reload().
     """
     try:

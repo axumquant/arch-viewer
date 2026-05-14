@@ -72,9 +72,11 @@ def _run_dev_mode(original_argv: list[str]):
                     old.kill()
                 except Exception:
                     pass
-        p = subprocess.Popen(cmd, stderr=sys.stderr, stdout=sys.stdout)
+        env = os.environ.copy()
+        env["PYTHONUTF8"] = "1"
+        p = subprocess.Popen(cmd, stderr=sys.stderr, stdout=sys.stdout, env=env)
         proc_holder[0] = p
-        print(f"\n♻  [reload] server started — PID {p.pid}", flush=True)
+        print(f"\n[reload] server started — PID {p.pid}", flush=True)
 
     class _PyChangeHandler(FileSystemEventHandler):
         def __init__(self):
@@ -90,20 +92,20 @@ def _run_dev_mode(original_argv: list[str]):
                 return
             self._last = now
             rel = Path(event.src_path).name
-            print(f"\n♻  [reload] {rel} changed — restarting…", flush=True)
+            print(f"\n[reload] {rel} changed — restarting...", flush=True)
             _start()
 
     observer = Observer()
     observer.schedule(_PyChangeHandler(), str(src_dir), recursive=True)
     observer.start()
-    print(f"♻  [reload] watching {src_dir} for Python changes", flush=True)
+    print(f"[reload] watching {src_dir} for Python changes", flush=True)
 
     _start()
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n♻  [reload] shutting down…", flush=True)
+        print("\n[reload] shutting down...", flush=True)
         if proc_holder[0]:
             try:
                 proc_holder[0].terminate()
