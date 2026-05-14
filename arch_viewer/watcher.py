@@ -140,6 +140,14 @@ class _Handler(FileSystemEventHandler):
 
     def on_created(self, event: FileSystemEvent):
         if event.is_directory:
+            # Folder created — synthesise a structural event so the tree rescans
+            try:
+                rel = os.path.relpath(event.src_path, self._root).replace("\\", "/")
+                if not self._should_ignore(rel):
+                    name = os.path.basename(event.src_path)
+                    self._callback(ChangeEvent("created", rel, name))
+            except Exception:
+                pass
             return
         ev = self._make_event("created", event.src_path)
         if ev:
@@ -147,13 +155,20 @@ class _Handler(FileSystemEventHandler):
 
     def on_modified(self, event: FileSystemEvent):
         if event.is_directory:
-            return
+            return  # directory mtime changes are noise — skip
         ev = self._make_event("modified", event.src_path)
         if ev:
             self._callback(ev)
 
     def on_deleted(self, event: FileSystemEvent):
         if event.is_directory:
+            try:
+                rel = os.path.relpath(event.src_path, self._root).replace("\\", "/")
+                if not self._should_ignore(rel):
+                    name = os.path.basename(event.src_path)
+                    self._callback(ChangeEvent("deleted", rel, name))
+            except Exception:
+                pass
             return
         ev = self._make_event("deleted", event.src_path)
         if ev:
@@ -161,6 +176,14 @@ class _Handler(FileSystemEventHandler):
 
     def on_moved(self, event: FileSystemEvent):
         if event.is_directory:
+            try:
+                dest = getattr(event, "dest_path", event.src_path)
+                rel = os.path.relpath(dest, self._root).replace("\\", "/")
+                if not self._should_ignore(rel):
+                    name = os.path.basename(dest)
+                    self._callback(ChangeEvent("moved", rel, name))
+            except Exception:
+                pass
             return
         ev = self._make_event("moved", getattr(event, "dest_path", event.src_path))
         if ev:
