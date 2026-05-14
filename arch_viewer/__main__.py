@@ -130,7 +130,7 @@ to enter keys on first use.
         stream=sys.stderr,  # MCP uses stdout for protocol
     )
 
-    # Bootstrap required services (Neo4j + Qdrant). No flat-file fallback.
+    # Bootstrap required services (Neo4j + Qdrant). Degrade gracefully if unavailable.
     if not args.scan:
         from .stack import bootstrap_stack, StackError
         try:
@@ -138,10 +138,9 @@ to enter keys on first use.
             bootstrap_stack()
             print("✓ Stack ready", file=sys.stderr)
         except StackError as e:
-            print(f"\n✗ Required stack not available: {e}\n", file=sys.stderr)
-            print("arch-viewer requires Neo4j + Qdrant to be running. Ensure Docker Desktop", file=sys.stderr)
-            print("is installed and accessible, then re-launch.\n", file=sys.stderr)
-            sys.exit(2)
+            print(f"\n⚠ Stack unavailable: {e}", file=sys.stderr)
+            print("⚠ Continuing without Neo4j / Qdrant — graph and memory tabs will show", file=sys.stderr)
+            print("  'disconnected' until Docker Desktop is running.\n", file=sys.stderr)
 
     if args.scan:
         # Scan-only mode
