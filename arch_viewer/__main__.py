@@ -32,7 +32,85 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import sys
+import time
+
+
+def _run_dev_mode(original_argv: list[str]):
+    """
+    Hot-reload launcher.
+
+    Spawns the real arch-viewer server as a subprocess and restarts it
+    whenever any .py file inside arch_viewer/ changes.  The browser
+    reconnects automatically (ws.onclose already retries every 2 s).
+
+    Usage:
+        python -m arch_viewer --web --reload --port 3777 /path/to/project
+    """
+    from pathlib import Path
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler
+
+    src_dir = Path(__file__).parent
+
+    # Strip --reload / --dev so the child doesn't recurse
+    skip = {"--reload", "--dev"}
+    child_argv = [a for a in original_argv if a not in skip]
+    cmd = [sys.executable, "-m", "arch_viewer"] + child_argv
+
+    proc_holder: list[subprocess.Popen | None] = [None]
+
+    def _start():
+        old = proc_holder[0]
+        if old is not None:
+            try:
+                old.terminate()
+                old.wait(timeout=6)
+            except Exception:
+                try:
+                    old.kill()
+                except Exception:
+                    pass
+        p = subprocess.Popen(cmd, stderr=sys.stderr, stdout=sys.stdout)
+        proc_holder[0] = p
+        print(f"\n♻  [reload] server started — PID {p.pid}", flush=True)
+
+    class _PyChangeHandler(FileSystemEventHandler):
+        def __init__(self):
+            self._last = 0.0
+
+        def on_modified(self, event):
+            if event.is_directory:
+                return
+            if not str(event.src_path).endswith(".py"):
+                return
+            now = time.time()
+            if now - self._last < 1.5:
+                return
+            self._last = now
+            rel = Path(event.src_path).name
+            print(f"\n♻  [reload] {rel} changed — restarting…", flush=True)
+            _start()
+
+    observer = Observer()
+    observer.schedule(_PyChangeHandler(), str(src_dir), recursive=True)
+    observer.start()
+    print(f"♻  [reload] watching {src_dir} for Python changes", flush=True)
+
+    _start()
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n♻  [reload] shutting down…", flush=True)
+        if proc_holder[0]:
+            try:
+                proc_holder[0].terminate()
+            except Exception:
+                pass
+        observer.stop()
+    observer.join()
 
 
 def main():
@@ -95,8 +173,17 @@ to enter keys on first use.
         "--verbose", "-v", action="store_true",
         help="Verbose logging",
     )
+    parser.add_argument(
+        "--reload", "--dev", action="store_true",
+        help="Hot-reload mode: restart server automatically when Python source files change",
+    )
 
     args = parser.parse_args()
+
+    # ── Hot-reload wrapper (must be before any heavy imports) ──
+    if args.reload:
+        _run_dev_mode(sys.argv[1:])
+        return
 
     # Resolve config from args + env
     root = args.root or os.environ.get("ARCH_VIEWER_ROOT", os.getcwd())

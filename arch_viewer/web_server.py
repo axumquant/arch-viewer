@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from pathlib import Path
 
 import aiohttp
@@ -36,16 +37,22 @@ async def start_web_server(arch_mcp, port: int = 3777):
 
     # ─── Routes ───
 
+    _NO_CACHE = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+
     async def handle_index(request):
         web_dir = Path(__file__).parent.parent / "web"
         index_path = web_dir / "index.html"
         if index_path.exists():
-            return web.FileResponse(index_path)
+            return web.FileResponse(index_path, headers=_NO_CACHE)
         # Fallback to old public/index.html
         public_dir = Path(__file__).parent.parent / "public"
         alt_path = public_dir / "index.html"
         if alt_path.exists():
-            return web.FileResponse(alt_path)
+            return web.FileResponse(alt_path, headers=_NO_CACHE)
         return web.Response(text="Dashboard not found", status=404)
 
     async def handle_api_scan(request):
@@ -537,6 +544,60 @@ async def start_web_server(arch_mcp, port: int = 3777):
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     log.info("Web dashboard at http://localhost:%d", port)
+
+    # ── Static-file live-reload watcher ───────────────────────────────────
+    # Watches web/ (index.html, CSS, JS) and broadcasts {type:"reload"} to
+    # every connected browser tab so they pick up changes instantly without
+    # a manual hard-refresh.  Runs in watchdog's own thread; callbacks are
+    # dispatched safely back into the asyncio event loop.
+    _start_static_watcher(ws_broadcast)
+
+
+def _start_static_watcher(ws_broadcast):
+    """
+    Start a background watchdog observer that watches the web/ directory.
+    When any static asset (index.html, JS, CSS, …) is saved, every open
+    browser tab receives {type:"reload"} and calls location.reload().
+    """
+    try:
+        from watchdog.observers import Observer
+        from watchdog.events import FileSystemEventHandler
+    except ImportError:
+        log.debug("watchdog not installed — static live-reload disabled")
+        return
+
+    web_dir = Path(__file__).parent.parent / "web"
+    if not web_dir.exists():
+        return
+
+    loop = asyncio.get_event_loop()
+
+    class _StaticHandler(FileSystemEventHandler):
+        _last = 0.0
+
+        def _dispatch_reload(self, path: str):
+            now = time.time()
+            if now - _StaticHandler._last < 0.8:
+                return
+            _StaticHandler._last = now
+            name = Path(path).name
+            log.info("Static file changed (%s) — pushing browser reload", name)
+            payload = json.dumps({"type": "reload", "reason": name})
+            asyncio.run_coroutine_threadsafe(ws_broadcast(payload), loop)
+
+        def on_modified(self, event):
+            if not event.is_directory:
+                self._dispatch_reload(event.src_path)
+
+        def on_created(self, event):
+            if not event.is_directory:
+                self._dispatch_reload(event.src_path)
+
+    observer = Observer()
+    observer.schedule(_StaticHandler(), str(web_dir), recursive=True)
+    observer.daemon = True
+    observer.start()
+    log.info("Static live-reload watching %s", web_dir)
 
 
 def _flatten_tree(tree: dict, prefix: str = "") -> list[tuple[str, dict]]:

@@ -31,6 +31,15 @@
   .header .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
   .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); transition: 0.3s; }
   .conn-dot.on { background: var(--green); }
+  /* Hot-reload toast */
+  #hotReloadToast {
+    display: none; position: fixed; bottom: 18px; right: 18px; z-index: 9999;
+    background: var(--bg3); border: 1px solid var(--accent); color: var(--accent);
+    padding: 8px 16px; border-radius: 8px; font-size: 12px; font-family: var(--mono);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5); animation: fadeInUp 0.25s ease;
+  }
+  #hotReloadToast.show { display: block; }
+  @keyframes fadeInUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
 
   /* Main layout */
   .main { display: flex; flex: 1; overflow: hidden; }
@@ -312,6 +321,7 @@
   <button class="refresh-btn" id="settingsBtn" title="API key settings">⚙ Keys</button>
   <div class="conn-dot" id="wsDot" title="WebSocket"></div>
 </div>
+<div id="hotReloadToast">♻ hot reload</div>
 <div class="main">
   <div class="sidebar" id="leftSidebar">
     <button class="panel-toggle left-toggle" id="leftToggle" title="Toggle file tree" onclick="togglePanel('left')">◀</button>
@@ -504,19 +514,44 @@ function getCMLang(lang) {
   return null;
 }
 
+// ─── Hot-reload toast ───
+let _toastTimer = null;
+function _showReloadToast(msg) {
+  const t = document.getElementById("hotReloadToast");
+  if (!t) return;
+  t.textContent = "♻ " + msg;
+  t.classList.add("show");
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove("show"), 2500);
+}
+
 // ─── WebSocket ───
 function connectWS() {
   const proto = location.protocol==="https:"?"wss:":"ws:";
   const ws = new WebSocket(`${proto}//${location.host}/ws`);
   S.ws = ws;
-  ws.onopen = () => { document.getElementById("wsDot").classList.add("on"); };
-  ws.onclose = () => { document.getElementById("wsDot").classList.remove("on"); setTimeout(connectWS, 2000); };
+  ws.onopen = () => {
+    document.getElementById("wsDot").classList.add("on");
+    // Show "reconnected" toast if this isn't the very first connect
+    if (S._wsEverConnected) _showReloadToast("reconnected");
+    S._wsEverConnected = true;
+  };
+  ws.onclose = () => {
+    document.getElementById("wsDot").classList.remove("on");
+    setTimeout(connectWS, 2000);
+  };
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
     if (m.type === "init" || m.components) { S.arch = m; renderAll(); }
     if (m.type === "file_change") handleChange(m);
     if (m.type === "file_content") handleContent(m);
     if (m.type === "file_saved") { S.dirty.delete(m.path); renderTabs(); }
+    if (m.type === "reload") {
+      // Server pushed a hot-reload (static file changed)
+      console.log("[hot-reload] reloading for:", m.reason || "static change");
+      _showReloadToast("reloading…");
+      setTimeout(() => location.reload(), 300);
+    }
   };
 }
 
