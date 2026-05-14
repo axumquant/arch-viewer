@@ -320,7 +320,7 @@
       <div class="pane" id="diagramView">
         <div class="diag-toolbar">
           <span style="color:var(--fg);font-weight:600">Interactive Architecture</span>
-          <button onclick="loadRichDiagram()">↻ Reload Diagram</button>
+          <button onclick="loadRichDiagram(true)">↻ Reload Diagram</button>
           <span class="hint">Scroll to zoom · Drag to pan · Click nodes for details</span>
         </div>
         <iframe id="diagramFrame" src="about:blank" style="flex:1;border:none;width:100%;min-height:0;background:var(--bg)"></iframe>
@@ -898,19 +898,17 @@ async function refreshMemory() {
 }
 
 // ─── Interactive Architecture Diagram (rich iframe from /api/diagram/html) ───
-let _diagramLoaded = false;
-
-function loadRichDiagram() {
+function loadRichDiagram(force) {
   const frame = document.getElementById("diagramFrame");
   if (!frame) return;
-  if (!_diagramLoaded || frame.src === "about:blank") {
-    frame.src = "/api/diagram/html";
-    _diagramLoaded = true;
+  // Always reload with cache-bust so the user sees the latest generated diagram
+  if (force || frame.src === "about:blank" || frame.src.indexOf("about:") === 0) {
+    frame.src = "/api/diagram/html?t=" + Date.now();
   }
 }
 
-// Diagram reload on navigate
-function resetDiagramView() { loadRichDiagram(); }
+// Diagram reload on navigate / button click — force fresh
+function resetDiagramView() { loadRichDiagram(true); }
 
 // ─── Actions ───
 function openFile(p) { reqFile(p); }
@@ -931,7 +929,7 @@ function mdToHtml(md) {
 }
 
 // ─── Events ───
-document.querySelectorAll(".vb").forEach(b => b.onclick = () => { S.view=b.dataset.v; renderVB(); if(S.view==="editor")renderEditor(); if(S.view==="diagram")loadRichDiagram(); });
+document.querySelectorAll(".vb").forEach(b => b.onclick = () => { S.view=b.dataset.v; renderVB(); if(S.view==="editor")renderEditor(); if(S.view==="diagram")loadRichDiagram(true); });
 document.getElementById("treeFilter").addEventListener("input", renderTree);
 document.getElementById("showHiddenToggle").addEventListener("change", renderTree);
 document.getElementById("refreshBtn").onclick = () => { S.ws?.send(JSON.stringify({type:"refresh_ai"})); document.getElementById("refreshBtn").textContent="↻ Analyzing..."; setTimeout(()=>document.getElementById("refreshBtn").textContent="↻ Refresh", 30000); };

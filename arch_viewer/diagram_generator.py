@@ -96,6 +96,10 @@ NODE_Y_STEP_TIGHT = 80      # used when a column has many sub-nodes
 TIGHT_PACK_THRESHOLD = 6    # >= this many sub-nodes -> use tight pack
 LAYER_LABEL_Y = 60
 MAX_SUBNODES_PER_COMPONENT = 14
+# When a column has more nodes than this, split it into a grid of sub-columns
+# so it doesn't collapse into a tall tower.
+COL_SPLIT_THRESHOLD = 8
+SUB_COL_WIDTH = 200         # narrower x-offset between split sub-columns
 
 # Well-known entry-file basenames (per language/stack) used as a last-resort
 # source of sub-nodes when a component has no routes / entry_points.
@@ -277,71 +281,86 @@ def _layout(arch: Architecture) -> tuple[dict, list[dict], list[dict], dict]:
     nodes_by_id: dict[str, dict] = {}
     layer_labels: list[dict] = []
 
-    col_index = 0
+    # First pass: gather every (column, component, blueprints) so we can compute
+    # how many physical sub-columns each ComponentType column needs (split into
+    # a grid when there are too many nodes).
+    col_plans: list[tuple[ComponentType, list[Component], list[list[dict]]]] = []
     for ctype in COLUMN_ORDER:
         comps = by_type.get(ctype, [])
         if not comps:
             continue
+        bp_lists = [_expand_component(c) for c in comps]
+        col_plans.append((ctype, comps, bp_lists))
 
-        x = COL_X_START + col_index * COL_WIDTH
-        col_y = NODE_Y_START
+    # Lay out columns left-to-right, splitting wide columns into N sub-columns.
+    col_x = COL_X_START
+    for ctype, comps, bp_lists in col_plans:
+        total_nodes = sum(len(b) for b in bp_lists)
+        # How many physical sub-columns to use for this logical column?
+        if total_nodes >= COL_SPLIT_THRESHOLD * 2:
+            sub_cols = 3
+        elif total_nodes >= COL_SPLIT_THRESHOLD:
+            sub_cols = 2
+        else:
+            sub_cols = 1
 
-        # Layer label: column heading. If the column has a single component
-        # whose name differs from the generic label, prefer the component name
-        # so e.g. "Backend API" or "Extension" shows the actual component
-        # name like the Sales Coach reference.
+        nodes_per_sub = max(1, (total_nodes + sub_cols - 1) // sub_cols)
+        step = NODE_Y_STEP_TIGHT if total_nodes >= TIGHT_PACK_THRESHOLD else NODE_Y_STEP
+
+        # Layer label spans the centre of the sub-columns
         label_text = COLUMN_LABELS[ctype]
         if len(comps) == 1 and comps[0].name and comps[0].name.lower() != label_text.lower():
-            label_text = f"{comps[0].name} ({label_text})" if label_text not in comps[0].name else comps[0].name
+            label_text = comps[0].name if label_text in comps[0].name else f"{comps[0].name} ({label_text})"
+        col_block_width = sub_cols * SUB_COL_WIDTH if sub_cols > 1 else COL_WIDTH
         layer_labels.append({
             "text": label_text,
-            "x": x + NODE_X_OFFSET,
+            "x": col_x + NODE_X_OFFSET + (col_block_width - COL_WIDTH) // 2,
             "y": LAYER_LABEL_Y,
         })
 
-        for comp in comps:
-            blueprints = _expand_component(comp)
-            # Choose step size based on how many sub-nodes we're stacking in
-            # this column overall — tighter when crowded.
-            step = NODE_Y_STEP_TIGHT if len(blueprints) >= TIGHT_PACK_THRESHOLD else NODE_Y_STEP
+        # Flatten all blueprints in this column with their component context,
+        # then distribute into the sub-columns.
+        flat: list[tuple[Component, dict]] = []
+        for comp, bps in zip(comps, bp_lists):
+            for bp in bps:
+                flat.append((comp, bp))
 
-            primary_node: dict | None = None
-            for bp in blueprints:
-                node_id = _safe_id(comp.name + "__" + bp["label"] + "__" + str(col_y))
-                node = {
-                    "id": node_id,
-                    "name": bp["label"],
-                    "label": bp["label"],
-                    "sub": bp["sub"],
-                    "tier": TIER_BY_TYPE.get(ctype, "low"),
-                    "type": ctype.value,
-                    "x": x + NODE_X_OFFSET,
-                    "y": col_y,
-                    "path": bp["path"],
-                    "description": bp["component_description"],
-                    "tech_stack": list(comp.tech_stack or []),
-                    "files_count": len(comp.files or []),
-                    "routes_count": len(bp.get("routes") or []) if bp["kind"] == "route_file" else len(comp.api_routes or []),
-                    "api_routes": bp.get("routes") or [],
-                    "kind": bp["kind"],
-                    "component_name": comp.name,
-                }
-                nodes_list.append(node)
-                nodes_by_id[node_id] = node
-                if primary_node is None:
-                    primary_node = node
-                col_y += step
+        primary_by_comp: dict[str, dict] = {}
+        for idx, (comp, bp) in enumerate(flat):
+            sub_idx = idx // nodes_per_sub
+            row_idx = idx % nodes_per_sub
+            x = col_x + NODE_X_OFFSET + sub_idx * SUB_COL_WIDTH
+            y = NODE_Y_START + row_idx * step
 
-            # Map this component name to its *primary* sub-node so flow edges
-            # referencing the component land on a single anchor point.
-            if primary_node is not None:
-                nodes_by_component_name[comp.name] = primary_node
+            node_id = _safe_id(comp.name + "__" + bp["label"] + "__" + str(idx))
+            node = {
+                "id": node_id,
+                "name": bp["label"],
+                "label": bp["label"],
+                "sub": bp["sub"],
+                "tier": TIER_BY_TYPE.get(ctype, "low"),
+                "type": ctype.value,
+                "column": ctype.value,
+                "x": x,
+                "y": y,
+                "path": bp["path"],
+                "description": bp["component_description"],
+                "tech_stack": list(comp.tech_stack or []),
+                "files_count": len(comp.files or []),
+                "routes_count": len(bp.get("routes") or []) if bp["kind"] == "route_file" else len(comp.api_routes or []),
+                "api_routes": bp.get("routes") or [],
+                "kind": bp["kind"],
+                "component_name": comp.name,
+            }
+            nodes_list.append(node)
+            nodes_by_id[node_id] = node
+            if comp.name not in primary_by_comp:
+                primary_by_comp[comp.name] = node
 
-            # Small gap between distinct components stacked in the same
-            # column (rare, but possible).
-            col_y += int(step * 0.4)
+        for cname, n in primary_by_comp.items():
+            nodes_by_component_name[cname] = n
 
-        col_index += 1
+        col_x += col_block_width
 
     return nodes_by_component_name, nodes_list, layer_labels, nodes_by_id
 
@@ -364,6 +383,81 @@ def _build_flow_edges(
             "bidi": (f.direction.value == "bidirectional") if hasattr(f.direction, "value") else False,
         })
     return edges
+
+
+def _build_inferred_inter_column_edges(
+    nodes_list: list[dict], explicit_pairs: set[tuple[str, str]]
+) -> list[dict]:
+    """
+    When the architecture has very few explicit data_flows (common for projects
+    that haven't been deeply annotated), synthesise visible "next column"
+    edges so the diagram looks connected like the Sales Coach reference.
+
+    Strategy: for each adjacent ComponentType pair in COLUMN_ORDER that both
+    have nodes, draw an edge from every node in the left column to the primary
+    node of each component in the right column. Skip pairs already covered by
+    explicit flows.
+    """
+    edges: list[dict] = []
+
+    # Group nodes by their ComponentType column, preserving insertion order
+    by_col: "OrderedDict[str, list[dict]]" = OrderedDict()
+    for n in nodes_list:
+        col = n.get("column") or n.get("type", "other")
+        by_col.setdefault(col, []).append(n)
+
+    cols_in_order = [c.value for c in COLUMN_ORDER if c.value in by_col]
+    # Choose a sensible "primary" anchor per right-column component group
+    for i in range(len(cols_in_order) - 1):
+        left_col = cols_in_order[i]
+        right_col = cols_in_order[i + 1]
+        left_nodes = by_col[left_col]
+        right_nodes = by_col[right_col]
+
+        # Pick one anchor per distinct component_name in the right column
+        seen_comp: set[str] = set()
+        right_anchors: list[dict] = []
+        for rn in right_nodes:
+            cn = rn.get("component_name", "")
+            if cn in seen_comp:
+                continue
+            seen_comp.add(cn)
+            right_anchors.append(rn)
+        if not right_anchors:
+            continue
+
+        # Each left node connects to the closest right anchor (by y distance)
+        for ln in left_nodes:
+            target = min(right_anchors, key=lambda r: abs(r["y"] - ln["y"]))
+            key = (ln["id"], target["id"])
+            if key in explicit_pairs:
+                continue
+            explicit_pairs.add(key)
+            edges.append({
+                "from": ln["id"],
+                "to": target["id"],
+                "cls": _edge_cls_for_columns(left_col, right_col),
+                "protocol": "inferred",
+                "description": f"{left_col} → {right_col}",
+                "bidi": False,
+            })
+
+    return edges
+
+
+def _edge_cls_for_columns(left: str, right: str) -> str:
+    """Pick a colour class for an inferred edge based on the column pair."""
+    pair = (left, right)
+    # Audio/cue/portal-style mapping inspired by the Sales Coach legend
+    if left == "extension":
+        return "ws"      # extension → backend usually streams
+    if right == "database" or right == "storage":
+        return "db"
+    if right == "cache":
+        return "queue"
+    if "queue" in (left, right):
+        return "queue"
+    return "http"
 
 
 def _build_cohesion_edges(nodes_list: list[dict]) -> list[dict]:
@@ -543,15 +637,15 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   /* SVG edges */
   svg.edges{position:absolute;top:0;left:0;pointer-events:none;overflow:visible}
-  .edge{fill:none;stroke-width:1.4;opacity:.4}
+  .edge{fill:none;stroke-width:1.6;opacity:.65}
   .edge.http{stroke:#3b82f6}
-  .edge.ws{stroke:#f472b6}
+  .edge.ws{stroke:#22d3ee}
   .edge.grpc{stroke:#a855f7}
   .edge.queue{stroke:#fb7185}
   .edge.db{stroke:#a3e635}
   .edge.default{stroke:#94a3b8}
-  .edge.import{stroke:#475569;opacity:.25;stroke-dasharray:2 4}
-  .edge.cohesion{stroke:#334155;opacity:.18;stroke-dasharray:1 5;stroke-width:1}
+  .edge.import{stroke:#475569;opacity:.22;stroke-dasharray:2 4;stroke-width:1}
+  .edge.cohesion{stroke:#475569;opacity:.35;stroke-dasharray:3 6;stroke-width:1.1}
 
   /* animated dash */
   @keyframes dash{to{stroke-dashoffset:-24}}
@@ -901,9 +995,12 @@ def generate_interactive_html(arch: Architecture, project_name: str) -> str:
     """
     nodes_by_component_name, nodes_list, layer_labels, _nodes_by_id = _layout(arch)
     flow_edges = _build_flow_edges(arch.data_flows, nodes_by_component_name)
+    explicit_pairs: set[tuple[str, str]] = {(e["from"], e["to"]) for e in flow_edges}
+    inferred_edges = _build_inferred_inter_column_edges(nodes_list, explicit_pairs)
     cohesion_edges = _build_cohesion_edges(nodes_list)
     import_edges = _build_import_edges(arch, nodes_list)
-    edges = flow_edges + import_edges + cohesion_edges
+    # Order matters for SVG painting: subtle layers first, prominent last
+    edges = cohesion_edges + import_edges + inferred_edges + flow_edges
 
     # Determine which tiers are actually present (for the legend)
     tiers_present: list[str] = []
