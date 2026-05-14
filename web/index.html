@@ -323,7 +323,7 @@
           <button onclick="loadRichDiagram()">↻ Reload Diagram</button>
           <span class="hint">Scroll to zoom · Drag to pan · Click nodes for details</span>
         </div>
-        <iframe id="diagramFrame" src="about:blank" style="flex:1;border:none;width:100%;height:100%;background:var(--bg)"></iframe>
+        <iframe id="diagramFrame" src="about:blank" style="flex:1;border:none;width:100%;min-height:0;background:var(--bg)"></iframe>
       </div>
       <div class="pane" id="graphView">
         <div class="diag-toolbar">
@@ -334,7 +334,7 @@
         </div>
         <div style="flex:1;overflow:hidden;display:flex;flex-direction:column;background:var(--bg)">
           <div id="graphSummary" style="padding:16px 20px;border-bottom:1px solid var(--bg4)"></div>
-          <iframe id="graphFrame" src="about:blank" style="flex:1;border:none;background:#fff"></iframe>
+          <div id="graphNodes" style="flex:1;overflow-y:auto;padding:16px 20px;font-size:12px"></div>
         </div>
       </div>
       <div class="pane" id="memoryView">
@@ -740,12 +740,12 @@ function renderVB() {
 
 // ─── Neo4j Graph View ───
 async function refreshGraph() {
+  const sumEl = document.getElementById("graphSummary");
+  const stEl = document.getElementById("graphStatus");
+  const nodesEl = document.getElementById("graphNodes");
   try {
     const r = await (await fetch("/api/graph/status")).json();
     const g = r.neo4j || {};
-    const sumEl = document.getElementById("graphSummary");
-    const stEl = document.getElementById("graphStatus");
-    const frame = document.getElementById("graphFrame");
 
     if (g.available) {
       stEl.innerHTML = '<span class="status-pill ok">● Connected</span>';
@@ -755,28 +755,85 @@ async function refreshGraph() {
         </div>
         <div class="stat-card"><div class="stat-num">${g.component_count||0}</div><div class="stat-lbl">Components</div></div>
         <div class="stat-card"><div class="stat-num">${g.dependency_count||0}</div><div class="stat-lbl">Dependencies</div></div>
-        <div class="stat-card"><div class="stat-num">${g.flow_count||0}</div><div class="stat-lbl">Data Flows</div></div>
-        <div style="margin-top:12px;font-size:11px;color:var(--fg3)">Neo4j Browser embedded below — login: <code>neo4j</code> / password from .env</div>`;
-      // Embed Neo4j browser
-      if (frame.src !== (g.browser_url + "/")) frame.src = g.browser_url || "http://localhost:7474";
+        <div class="stat-card"><div class="stat-num">${g.flow_count||0}</div><div class="stat-lbl">Data Flows</div></div>`;
+
+      // Load and render actual graph node data
+      try {
+        const nr = await (await fetch("/api/graph/nodes")).json();
+        if (nr.ok) {
+          let html = "";
+          const comps = nr.components || [];
+          const deps = nr.dependencies || [];
+          const flows = nr.flows || [];
+
+          if (comps.length) {
+            html += `<div class="mem-section"><h3>Components (${comps.length})</h3>`;
+            comps.forEach(c => {
+              html += `<div class="mem-item">
+                <strong>${esc(c.name||"?")}</strong>
+                ${c.type ? `<span style="margin-left:6px;background:var(--bg3);padding:1px 6px;border-radius:4px;font-size:10px">${esc(c.type)}</span>` : ""}
+                ${c.description ? `<div style="margin-top:3px;color:var(--fg2)">${esc(c.description)}</div>` : ""}
+              </div>`;
+            });
+            html += `</div>`;
+          }
+
+          if (deps.length) {
+            html += `<div class="mem-section"><h3>Dependencies (${deps.length})</h3>`;
+            deps.forEach(d => {
+              html += `<div class="mem-item">
+                <strong>${esc(d.name||"?")}</strong>
+                ${d.version ? `<span style="margin-left:6px;color:var(--fg3);font-size:11px">${esc(d.version)}</span>` : ""}
+                ${d.type ? `<span style="margin-left:6px;background:var(--bg3);padding:1px 6px;border-radius:4px;font-size:10px">${esc(d.type)}</span>` : ""}
+              </div>`;
+            });
+            html += `</div>`;
+          }
+
+          if (flows.length) {
+            html += `<div class="mem-section"><h3>Data Flows (${flows.length})</h3>`;
+            flows.forEach(f => {
+              html += `<div class="mem-item">
+                <strong>${esc(f.from_node||"?")}</strong>
+                <span style="color:var(--accent);margin:0 6px">→</span>
+                <strong>${esc(f.to_node||"?")}</strong>
+                ${f.label ? `<span style="margin-left:6px;color:var(--fg3);font-size:11px">${esc(f.label)}</span>` : ""}
+              </div>`;
+            });
+            html += `</div>`;
+          }
+
+          if (!comps.length && !deps.length && !flows.length) {
+            html = `<div style="color:var(--fg3);font-size:12px;padding:20px 0">
+              No graph data yet. Run <strong>Analyze</strong> with Neo4j connected to populate the knowledge graph.
+            </div>`;
+          }
+          nodesEl.innerHTML = html;
+        } else {
+          nodesEl.innerHTML = `<div style="color:var(--red)">Graph query error: ${esc(nr.error||"unknown")}</div>`;
+        }
+      } catch (ne) {
+        nodesEl.innerHTML = `<div style="color:var(--red)">Failed to load graph nodes: ${ne.message}</div>`;
+      }
     } else {
       stEl.innerHTML = '<span class="status-pill off">○ Disconnected</span>';
       sumEl.innerHTML = `
         <div style="color:var(--red);font-size:13px;line-height:1.6">
-          <strong>Neo4j disconnected.</strong> The bootstrap should have prevented this.<br>
-          Run <code>docker compose restart neo4j</code> or restart arch-viewer.
-          ${g.error ? '<div style="margin-top:8px;font-size:11px;color:var(--fg3)">Error: ' + g.error + '</div>' : ''}
+          <strong>Neo4j not connected.</strong>
+          ${g.error ? `<div style="margin-top:8px;font-size:11px;color:var(--fg3)">Error: ${esc(g.error)}</div>` : ""}
+          <div style="margin-top:8px;font-size:11px;color:var(--fg3)">Start Neo4j and set NEO4J_URI / NEO4J_PASSWORD in your environment, then click ↻ Refresh.</div>
         </div>`;
-      frame.src = "about:blank";
+      nodesEl.innerHTML = "";
     }
   } catch (e) {
-    document.getElementById("graphStatus").innerHTML = '<span class="status-pill off">○ Error</span>';
-    document.getElementById("graphSummary").innerHTML = '<div style="color:var(--red)">Failed to check graph status: ' + e.message + '</div>';
+    stEl.innerHTML = '<span class="status-pill off">○ Error</span>';
+    sumEl.innerHTML = `<div style="color:var(--red)">Failed to check graph status: ${e.message}</div>`;
+    nodesEl.innerHTML = "";
   }
 }
 
 function openInline(url) {
-  document.getElementById("graphFrame").src = url;
+  window.open(url, "_blank");
 }
 
 // ─── Mem0 Memory View ───
@@ -825,10 +882,11 @@ async function refreshMemory() {
 
     html += `<div class="mem-section"><h3>Analysis History</h3>`;
     const hist = (r.history||[]).slice(0,10);
-    if (!hist.length) html += '<div style="color:var(--fg3);font-size:11px">No analyses recorded yet.</div>';
+    if (!hist.length) html += '<div style="color:var(--fg3);font-size:11px">No analyses recorded yet. Run an AI analysis to populate this.</div>';
     else hist.forEach(h => {
-      html += `<div class="mem-item">v${h.version||"?"} · ${h.component_count||0} components · ${h.flow_count||0} flows
-        <div class="mem-meta">${h.timestamp||""}</div></div>`;
+      const ts = h.timestamp ? new Date(h.timestamp * 1000).toLocaleString() : "";
+      html += `<div class="mem-item">Score: <strong style="color:var(--accent)">${h.score ?? "?"}</strong> &nbsp;·&nbsp; ${h.components ?? 0} components
+        <div class="mem-meta">${ts}</div></div>`;
     });
     html += `</div>`;
 

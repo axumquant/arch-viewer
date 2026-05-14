@@ -466,6 +466,44 @@ async def start_web_server(arch_mcp, port: int = 3777):
         except Exception as e:
             return web.json_response({"ok": False, "error": str(e)})
 
+    async def handle_api_graph_nodes(request):
+        """Return Neo4j Components, Dependencies, and FLOWS_TO rels for the project."""
+        try:
+            from .graph_store import GraphStore
+            gs = GraphStore(project_root=root)
+            if not gs.connect():
+                return web.json_response({"ok": False, "error": "Neo4j not available"})
+            try:
+                with gs._driver.session() as session:
+                    comps = session.run(
+                        "MATCH (c:Component {project_id: $p}) "
+                        "RETURN c.name AS name, c.type AS type, c.description AS description "
+                        "ORDER BY c.name LIMIT 200",
+                        p=gs.project_id,
+                    ).data()
+                    deps = session.run(
+                        "MATCH (d:Dependency {project_id: $p}) "
+                        "RETURN d.name AS name, d.version AS version, d.dep_type AS type "
+                        "ORDER BY d.name LIMIT 200",
+                        p=gs.project_id,
+                    ).data()
+                    flows = session.run(
+                        "MATCH (a)-[r:FLOWS_TO {project_id: $p}]->(b) "
+                        "RETURN a.name AS from_node, b.name AS to_node, r.label AS label "
+                        "LIMIT 200",
+                        p=gs.project_id,
+                    ).data()
+            finally:
+                gs.close()
+            return web.json_response({
+                "ok": True,
+                "components": comps,
+                "dependencies": deps,
+                "flows": flows,
+            })
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)})
+
     # ─── App Setup ───
 
     app = web.Application()
@@ -492,6 +530,7 @@ async def start_web_server(arch_mcp, port: int = 3777):
     app.router.add_get("/api/diagram/html", handle_api_diagram_html)
     app.router.add_get("/api/memory", handle_api_memory)
     app.router.add_get("/api/graph/status", handle_api_graph_status)
+    app.router.add_get("/api/graph/nodes", handle_api_graph_nodes)
 
     runner = web.AppRunner(app)
     await runner.setup()
