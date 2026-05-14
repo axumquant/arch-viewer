@@ -97,7 +97,16 @@ class GraphStore:
 
         last_exc: Exception | None = None
         for pwd in attempts:
-            auth = (self.user, pwd) if pwd else None
+            # Neo4j 5.x requires explicit basic-auth object; plain tuple works
+            # for 4.x but fails on 5.x with "missing key scheme".
+            if pwd:
+                try:
+                    from neo4j import basic_auth  # type: ignore
+                    auth = basic_auth(self.user, pwd)
+                except ImportError:
+                    auth = (self.user, pwd)
+            else:
+                auth = None
             driver = None
             try:
                 driver = GraphDatabase.driver(self.uri, auth=auth)
