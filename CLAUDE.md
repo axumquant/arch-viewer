@@ -4,7 +4,7 @@ MCP-native architecture viewer with AI-powered codebase analysis, AST parsing, a
 
 ## Architecture
 
-- **Python package** (`arch_viewer/`) — MCP server with 13 tools, AI agent (pydantic-ai), AST analyzer, scoring engine, dependency graph builder, aiohttp web server
+- **Python package** (`arch_viewer/`) — MCP server with 17 tools, AI agent (pydantic-ai), AST analyzer, scoring engine, dependency graph builder, aiohttp web server
 - **Node.js server** (`src/`) — Zero-dep express dashboard with WebSocket file watching (subset of Python features)
 - **Web dashboard** (`web/index.html`) — Single-file enhanced dashboard with settings modal for API keys + model selection
 
@@ -14,7 +14,7 @@ MCP-native architecture viewer with AI-powered codebase analysis, AST parsing, a
 - `scoring.py` — 0-100 health score across 4 categories (Modularity, Code Quality, Maintainability, Structure). Anti-pattern detection.
 - `dep_graph.py` — Builds import/call/package/component graphs. Hotspot analysis, isolated node detection.
 - `agent.py` — pydantic-ai agent with 4 providers (Ollama Cloud, OpenAI, Anthropic, Groq). API keys in `.arch-viewer.keys.json`.
-- `mcp_server.py` — 13 MCP tools. MCP mode is default (no `--mcp` flag).
+- `mcp_server.py` — 17 MCP tools. MCP mode is default (no `--mcp` flag).
 - `scanner.py` — Static scanner. Component detection, route extraction, dependency collection.
 
 ## Commands

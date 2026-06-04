@@ -24,15 +24,10 @@ Point arch-viewer at any codebase and get a living, AI-curated map of how it act
 
 ---
 
-## Demo
+## What you get
 
-> Screenshots live in [`docs/screenshots/`](docs/) — drop your own in to replace the placeholders below.
-
-![Dashboard](docs/screenshots/dashboard.png)
-*Live dashboard at `http://localhost:3777` — file tree, architecture score, AST analysis, AI summary, editor.*
-
-![Interactive diagram](docs/screenshots/diagram.png)
-*Standalone HTML diagram produced by the `generate_interactive_diagram` MCP tool — pan, zoom, click a node to see its files and routes.*
+- **A live dashboard** at `http://localhost:3777` — file tree, architecture health score, AST analysis, AI summary, and an in-browser editor.
+- **A standalone, interactive HTML diagram** from the `generate_interactive_diagram` MCP tool — pan, zoom, and click any node to see its files and routes.
 
 ---
 
